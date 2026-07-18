@@ -68,6 +68,7 @@ plugin-sdk-bridge.ts → plugin-sdk-routes.ts → plugin-pet-registry.ts
 ```
 windows.ts (IPC handlers)
 └── agent-setup.ts
+    ├── codex-hook-review.ts (safe cross-platform interactive CLI launch plans)
     ├── detectClaudeCodeStatus() (claude --version, claude mcp list)
     ├── runAgentSetupAction()
     │   ├── configure/replace/remove (MCP commands)
@@ -274,7 +275,8 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 - `plugin-voice.ts`: Voice/TTS and one-shot listen facade gated by settings and permissions.
 
 **Agent Integration**:
-- `agent-setup.ts`: Claude/OpenCode/Cursor detection, MCP configuration, hooks management, action journaling
+- `agent-setup.ts`: Claude/OpenCode/Cursor/Codex detection, MCP configuration, hooks management, guided Codex review launch, action journaling
+- `codex-hook-review.ts`: Pure validated macOS/Windows/Linux terminal launch planning for user-owned Codex hook review
 - `claude-memory.ts`: Claude instructions file management (`~/.claude/openpets.md`)
 - `update-checker.ts`: GitHub release polling, update status
 - `update-version.ts`: Version parsing and comparison

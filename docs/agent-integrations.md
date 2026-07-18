@@ -3,8 +3,9 @@
 OpenPets reacts to coding agents. Each supported agent has an integration
 package that does two jobs: **configure** the agent to talk to OpenPets, and at
 runtime **translate** the agent's activity into safe pet reactions sent over
-local IPC. This doc covers all five integrations (Claude Code, MCP, OpenCode,
-Cursor, Pi), the shared speech-safety layer, and the CLI that orchestrates them.
+local IPC. This doc covers the first-class integrations (Claude Code, Codex,
+MCP, OpenCode, Cursor, Pi), the shared speech-safety layer, and the CLI that
+orchestrates them.
 
 For the wire protocol they all use, see [ipc.md](ipc.md). Source maps live in
 each `packages/*/codemap.md`.
@@ -96,11 +97,74 @@ The deepest integration, because Claude Code has a rich hook system.
 Doctor/install/uninstall helpers (`installClaudeHooks`, `doctorClaudeHooks`, …)
 are what the Control Center Integrations page and the CLI call.
 
+## Codex — `@open-pets/codex`
+
+The Control Center owns Codex setup as a first-class integration. OpenPets does
+not install a Codex marketplace plugin and does not launch an `npx` download at
+Codex startup. The desktop packages both the hook adapter and the existing
+`@open-pets/mcp` runtime, then configures Codex to invoke those ASAR-unpacked
+files directly.
+
+- **Detection and status:** the card reports the detected Codex version and
+  executable, connection state, hook trust, MCP ownership, last sanitized event,
+  and every managed path/entry. The current adapter is contract-gated to the
+  verified Codex `0.144.x` hook/config surface; other versions show Unsupported
+  instead of guessing.
+- **Activity reactions:** managed entries in `~/.codex/hooks.json` automatically
+  move the pet through thinking, working, editing, testing, waiting, success,
+  and error states as Codex works. `UserPromptSubmit`, `PreToolUse`,
+  `PermissionRequest`, `PostToolUse`, `SubagentStop`, and `Stop` provide the
+  lifecycle signals. Raw prompt, tool input, output, paths, and secrets are never
+  persisted or sent as event metadata.
+- **Pet controls:** the same Connect transaction registers the bundled
+  `openpets` MCP server. Users can ask Codex to make the pet react, say a short
+  message, or show a local image through `openpets_react`, `openpets_say`, and
+  `openpets_show_media`. There is intentionally no second toggle: lifecycle
+  reactions and intentional MCP controls are one connection.
+- **Trust:** OpenPets writes hooks but never self-approves them. When approval is
+  pending, **Review in Codex** opens an interactive Codex CLI session in the
+  user's terminal. The user approves the six OpenPets commands ending in
+  `--openpets-managed` when Codex shows **Hooks need review**. When that screen
+  reports exactly the six expected hooks, the UI directs the user to **Trust all
+  and continue**; a different count sends them through **Review hooks** so only
+  OpenPets-managed commands are approved. If Codex self-updates and exits first,
+  the same terminal handoff detects the version change and restarts Codex instead
+  of requiring another Review click. If the CLI is already open, `/hooks` opens
+  the same review screen there; `/hooks` is not a command in the Codex desktop
+  message composer. While the integration modal is open, OpenPets polls the
+  read-only trust result, refocuses the Control Center, and changes to Connected
+  as soon as approval completes. OpenPets reads the resulting `hooks.state`
+  hashes but never writes them, because an installer must not approve its own
+  command hooks.
+- **Ownership and repair:** hooks are marker-owned and merged without replacing
+  unrelated entries; MCP removal refuses foreign entries; writes are backed up
+  and rolled back if verification fails. Install/Repair first verifies the new
+  setup, then removes the exact legacy `openpets@personal` plugin registration,
+  trust blocks, cache, and runtime data while preserving `~/.codex/pets/`.
+
+Disconnect is one-step and idempotent: it removes only the current marker-owned
+hooks and matching MCP entry, then returns to Ready with Connect and Refresh.
+A late command timeout is treated as success only when a final doctor pass proves
+both owned components are absent; foreign entries remain untouched and visible
+as a conflict. The modal opens as soon as Connect starts, keeps status/actions,
+approval, and the last event in one connection journey, and shows progress on
+the active button (`Connecting…`, `Repairing…`, `Removing…`, or `Checking…`).
+Technical command overrides are collapsed under Troubleshooting and are blank
+by default; normal installations auto-detect Codex and use the runtime bundled
+with the desktop app. Transparency paths use `~` for the user's home and
+describe the managed entries without exposing the machine-specific packaged
+runtime path. Internally, machine-readable Codex JSON remains unredacted until
+ownership verification is complete; only renderer, log, and error-summary
+boundaries redact paths and secrets. The Integrations card never chooses a
+Companion conversation provider.
+
 ## MCP server — `@open-pets/mcp`
 
 A standalone stdio MCP server (`open-pets-mcp`) for any MCP-capable agent. It
-registers exactly three tools — `openpets_status`, `openpets_react`,
-`openpets_say` — with Zod-validated input and read-only/idempotent annotations.
+registers `openpets_status`, `openpets_react`, `openpets_say`, and
+`openpets_show_media` with Zod-validated input and read-only/idempotent
+annotations. Media requires an absolute supported local image path and remains
+subject to the desktop IPC file/size checks.
 On startup it acquires a lease, heartbeats every ~5s, and releases on
 SIGINT/SIGTERM. Errors are sanitized so IPC paths/tokens/sockets never leak into
 tool output. It is spawned by the CLI (`runMcp()`) which forwards stdio and
@@ -152,10 +216,14 @@ prompt/assistant/tool/command text, paths, URLs, or secrets.
 
 ## Codex CLI as a Companion target
 
-Companion Conversations can use an installed Codex CLI to generate ordinary pet
-conversation, but this is separate from all coding-agent integrations above.
-OpenPets does not install a Codex agent, MCP, hooks, rules, personality, or memory
-for this path. `CodexCompanionTarget` wraps the host's existing cancellable
+Companion Conversations can use Codex CLI to generate ordinary pet conversation,
+but provider selection remains separate from the coding-agent connection above.
+The Codex CLI option is always visible in Companion settings and is disabled with
+“Connect Codex in Integrations” until the first-class integration reports
+Connected. Selecting it does not install or modify hooks/MCP, nor does connecting
+the integration automatically make Codex the pet's brain.
+
+`CodexCompanionTarget` wraps the host's existing cancellable
 `CodexConversationTarget`, probes `codex --version`, `codex exec --help`, and
 resume support, and requires the structured `codex exec --json` contract. Each
 pet has its own runtime session UUID; changing provider or cancelling a turn
@@ -196,6 +264,7 @@ The CLI enforces safe project paths and atomic config writes throughout.
 | Agent | Config home | Runtime mechanism |
 |-------|-------------|-------------------|
 | Claude Code | `~/.claude/` (settings, MCP, `openpets.md`) | lifecycle hooks |
+| Codex | `~/.codex/hooks.json` + global `openpets` MCP entry | lifecycle hooks + bundled MCP |
 | MCP (generic) | agent's MCP config | stdio MCP tools |
 | OpenCode | `.opencode/` or `~/.config/opencode/` | plugin event hooks |
 | Cursor | `.cursor/mcp.json` + rules | MCP tools |

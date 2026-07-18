@@ -48,8 +48,9 @@ coding agent  ──(hook/MCP/plugin event)──▶  @open-pets/client
 |---------|------|-----|
 | `@open-pets/client` | The IPC client every integration uses to talk to the app | [ipc.md](ipc.md) |
 | `@open-pets/cli` | User-facing CLI: configure agents, manage pets, run MCP, scaffold/validate plugins | [agent-integrations.md](agent-integrations.md), [development.md](development.md) |
-| `@open-pets/mcp` | Stdio MCP server exposing `openpets_status` / `react` / `say` to MCP agents | [agent-integrations.md](agent-integrations.md) |
+| `@open-pets/mcp` | Stdio MCP server exposing status, reaction, speech, and local media tools to MCP agents | [agent-integrations.md](agent-integrations.md) |
 | `@open-pets/claude` | Claude Code hooks + MCP/settings/memory management | [agent-integrations.md](agent-integrations.md) |
+| `@open-pets/codex` | Codex detection, hook/MCP ownership, trust diagnosis, migration, and runtime adapter | [agent-integrations.md](agent-integrations.md) |
 | `@open-pets/opencode` | OpenCode plugin runtime + config management | [agent-integrations.md](agent-integrations.md) |
 | `@open-pets/cursor` | Cursor MCP config + project rules management | [agent-integrations.md](agent-integrations.md) |
 | `@open-pets/pi` | Pi coding-agent extension + `/openpets` commands | [agent-integrations.md](agent-integrations.md) |

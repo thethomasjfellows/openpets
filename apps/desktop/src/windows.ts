@@ -4,7 +4,7 @@ import sharp from "sharp";
 
 import { app, BrowserWindow, dialog, ipcMain, protocol, shell, type IpcMainInvokeEvent, type OpenDialogOptions } from "electron";
 
-import { getAgentSetupSnapshot, runAgentSetupAction, updateAgentSetupCommandPaths } from "./agent-setup.js";
+import { getAgentSetupSnapshot, launchCodexHookReview, runAgentSetupAction, updateAgentSetupCommandPaths } from "./agent-setup.js";
 import { refreshAgentPetContent } from "./agent-pet-controller.js";
 import { getAppStateSnapshot, getDesktopAnalyticsConsentState, normalizePetPoolOrder, petScaleOptions, setDesktopAnalyticsConsent, setPetPoolOrder, updatePreferences } from "./app-state.js";
 import { applyRoamingToAllPets } from "./pet-roaming-controller.js";
@@ -783,7 +783,7 @@ export function installInternalUiHandlers(): void {
 
   ipcMain.handle("openpets:agent-setup-action", async (event, action: unknown, selectedPetId: unknown, commandMode: unknown) => {
     assertAllowedSender(event, ["control-center"]);
-    if (action !== "configure" && action !== "replace" && action !== "remove" && action !== "install-memory" && action !== "doctor-hooks" && action !== "install-hooks" && action !== "uninstall-hooks" && action !== "opencode-install" && action !== "opencode-remove" && action !== "cursor-install" && action !== "cursor-replace" && action !== "cursor-remove") {
+    if (action !== "configure" && action !== "replace" && action !== "remove" && action !== "install-memory" && action !== "doctor-hooks" && action !== "install-hooks" && action !== "uninstall-hooks" && action !== "opencode-install" && action !== "opencode-remove" && action !== "cursor-install" && action !== "cursor-replace" && action !== "cursor-remove" && action !== "codex-install" && action !== "codex-repair" && action !== "codex-disconnect" && action !== "codex-refresh") {
       throw new Error("Invalid agent setup action.");
     }
 
@@ -797,6 +797,17 @@ export function installInternalUiHandlers(): void {
   ipcMain.handle("openpets:agent-setup-command-paths", (event, patch: unknown) => {
     assertAllowedSender(event, ["control-center"]);
     return updateAgentSetupCommandPaths(patch);
+  });
+
+  ipcMain.handle("openpets:codex-review-hooks", async (event) => {
+    assertAllowedSender(event, ["control-center"]);
+    return launchCodexHookReview();
+  });
+
+  ipcMain.handle("openpets:codex-review-complete", (event) => {
+    assertAllowedSender(event, ["control-center"]);
+    focusOpenTaskWindows();
+    return { ok: true };
   });
 }
 
@@ -818,6 +829,7 @@ async function chooseLocalPetImportKind(owner: BrowserWindow | undefined): Promi
 }
 
 function integrationTypeForSetupAction(action: string): string {
+  if (action.startsWith("codex-")) return "codex";
   if (action.startsWith("opencode-")) return "opencode";
   if (action.startsWith("cursor-")) return "cursor";
   if (action.includes("hook") || action === "install-memory") return "claude";

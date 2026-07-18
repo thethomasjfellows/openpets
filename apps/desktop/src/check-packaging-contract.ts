@@ -24,6 +24,7 @@ assert.match(packageJson.scripts?.["package:dir"] ?? "", /node scripts\/clean-pa
 assert.equal(rootPackageJson.scripts?.["package:desktop:dir"], "pnpm build && pnpm --filter @open-pets/desktop package:dir");
 assert.equal(packageJson.dependencies?.["@open-pets/claude"], "workspace:*");
 assert.equal(packageJson.dependencies?.["@open-pets/cli"], "workspace:*");
+assert.equal(packageJson.dependencies?.["@open-pets/codex"], "workspace:*");
 assert.equal(packageJson.dependencies?.["@open-pets/cursor"], "workspace:*");
 assert.equal(packageJson.dependencies?.["@open-pets/mcp"], "workspace:*");
 assert.equal(packageJson.dependencies?.["@open-pets/opencode"], "workspace:*");
@@ -252,6 +253,7 @@ assert.equal(pickReactionMessage("success", () => 0), reactionMessagePools.succe
 assert.doesNotMatch(controlCenterRendererSource, /OnboardingView|getOnboardingSnapshot|completeOnboarding/, "Control Center must not include the removed onboarding route.");
 assert.match(controlCenterRendererSource, /function IntegrationsView\(\)/, "Control Center must include integrations.");
 assert.match(enCatalogSource, /Claude Code/, "Control Center integrations must include Claude Code.");
+assert.match(enCatalogSource, /Codex lifecycle activity/, "Control Center integrations must include first-class Codex setup.");
 assert.match(enCatalogSource, /OpenCode/, "Control Center integrations must include OpenCode.");
 assert.match(enCatalogSource, /Cursor/, "Control Center integrations must include Cursor.");
 assert.match(enCatalogSource, /Pi/, "Control Center integrations must include Pi.");
@@ -262,6 +264,7 @@ assert.ok(existsSync(join(appDir, "scripts", "check-windows-symlink-privilege.cj
 assert.ok(existsSync(join(distDir, "main.js")), "desktop main build output must exist before packaging checks run.");
 assert.ok(existsSync(join(repoRoot, "packages", "claude", "dist", "index.js")), "@open-pets/claude must be built before packaging.");
 assert.ok(existsSync(join(repoRoot, "packages", "client", "dist", "index.js")), "@open-pets/client must be built before packaging.");
+assert.ok(existsSync(join(repoRoot, "packages", "codex", "dist", "cli.js")), "@open-pets/codex hook runtime must be built before packaging.");
 assert.ok(existsSync(join(repoRoot, "packages", "mcp", "dist", "index.js")), "@open-pets/mcp must be built before packaging.");
 assert.ok(existsSync(join(repoRoot, "packages", "cli", "dist", "index.js")), "@open-pets/cli must be built before packaging.");
 assert.ok(existsSync(join(repoRoot, "packages", "opencode", "dist", "plugin.js")), "@open-pets/opencode plugin must be built before packaging.");
@@ -292,6 +295,9 @@ function checkPackageOutput(): void {
   assert.ok(existsSync(join(appContents, "node_modules", "@open-pets", "claude", "package.json")), "packaged @open-pets/claude package metadata is missing.");
   assert.ok(existsSync(join(appContents, "node_modules", "@open-pets", "client", "dist", "index.js")), "packaged @open-pets/client runtime is missing.");
   assert.ok(existsSync(join(appContents, "node_modules", "@open-pets", "client", "package.json")), "packaged @open-pets/client package metadata is missing.");
+  assert.ok(existsSync(join(appContents, "node_modules", "@open-pets", "codex", "dist", "index.js")), "packaged @open-pets/codex runtime is missing.");
+  assert.ok(existsSync(join(appContents, "node_modules", "@open-pets", "codex", "dist", "cli.js")), "packaged @open-pets/codex hook CLI is missing.");
+  assert.ok(existsSync(join(appContents, "node_modules", "@open-pets", "codex", "package.json")), "packaged @open-pets/codex package metadata is missing.");
   assert.ok(existsSync(join(appContents, "node_modules", "@open-pets", "mcp", "dist", "index.js")), "packaged @open-pets/mcp runtime is missing.");
   assert.ok(existsSync(join(appContents, "node_modules", "@open-pets", "mcp", "package.json")), "packaged @open-pets/mcp package metadata is missing.");
   assert.ok(existsSync(join(appContents, "node_modules", "@open-pets", "cli", "dist", "index.js")), "packaged @open-pets/cli runtime is missing.");

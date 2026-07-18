@@ -193,6 +193,7 @@ To run OpenPets as an MCP tool, add the server to your agent's configuration:
 - `openpets_status`: Retrieve target pet ID and check runtime connectivity.
 - `openpets_react`: Set pet reaction animations (e.g., `thinking`, `editing`, `testing`, `success`, `error`).
 - `openpets_say`: Display a short speech bubble.
+- `openpets_show_media`: Show an intentional local PNG, JPG, WEBP, or GIF in the pet bubble.
 
 ### Local Privacy & Safety
 - All automated reactions run on static local triggers (e.g., when a command runs or a file is written).

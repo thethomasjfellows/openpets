@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import { CodexConversationTarget, parseCodexJsonLine } from "../src/voice-conversation-codex.js";
+import { CodexCompanionTarget } from "../src/companion-target-codex.js";
 
 assert.deepEqual(parseCodexJsonLine('{"type":"thread.started","thread_id":"thread-1"}'), { type: "session", sessionId: "thread-1" });
 assert.deepEqual(parseCodexJsonLine('{"type":"item.completed","item":{"type":"agent_message","text":"Hello"}}'), { type: "text", text: "Hello", final: true });
@@ -23,6 +24,13 @@ const first = await target.sendText({ text: "hello", signal: new AbortController
 const second = await target.sendText({ text: "again", sessionId: first.sessionId, signal: new AbortController().signal });
 assert.equal(second.text, "Second");
 assert.deepEqual(requests, [{ sessionId: undefined, text: "hello" }, { sessionId: "thread-1", text: "again" }]);
+
+const disconnectedCompanion = new CodexCompanionTarget(target, async () => ({ state: "installable" }));
+const disconnectedHealth = await disconnectedCompanion.health();
+assert.equal(disconnectedHealth.ready, false);
+assert.match(disconnectedHealth.reason ?? "", /Connect Codex in Integrations/);
+const connectedCompanion = new CodexCompanionTarget(target, async () => ({ state: "connected" }));
+assert.equal((await connectedCompanion.health()).ready, true);
 
 const cancelled = new AbortController();
 cancelled.abort();

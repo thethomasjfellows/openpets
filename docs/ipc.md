@@ -71,11 +71,16 @@ shapes before returning.
 | `pet.react` | Set a pet reaction (animation state) |
 | `pet.say` | Show a speech bubble on a pet |
 | `pet.showMedia` | Show a local image inside a pet's speech bubble |
+| `integration.event` | Record a sanitized first-party integration lifecycle event |
 | `lease.acquire` / `lease.heartbeat` / `lease.release` | Manage a pet lease |
 
 Client method names (`hello()`, `status()`, `listPets()`, `installPet()`,
 `installLocalPet()`, `acquireLease()`, `heartbeatLease()`, `releaseLease()`,
-`react()`, `say()`, `showMedia()`) wrap these. `installLocalPet()` requires an
+`react()`, `say()`, `showMedia()`, `recordIntegrationEvent()`) wrap these.
+`integration.event` currently accepts only the `codex` integration id, one of
+the allow-listed lifecycle names, and a finite timestamp. Validation constructs
+a fresh safe object; extra hook fields such as prompt/tool content are discarded
+before app state is written. `installLocalPet()` requires an
 absolute path and an explicit `zip`/`folder` kind. `react()`/`say()`/
 `showMedia()` accept an optional `leaseId` to target a specific pet.
 
@@ -111,6 +116,8 @@ It uses narrow Electron IPC between the sandboxed Control Center renderer,
 | `openpets:companion-send`, `companion-cancel` | Send/cancel a typed pet-scoped turn through the main-process orchestrator |
 | `openpets:voice-ptt-start` / `-stop`, `voice-activity-cancel`, `voice-listening-state-get` | Drive the shared bounded PTT/transcription path |
 | `openpets:plugin-platform-settings-*`, `plugin-platform-ai-key-*` | Configure the host-AI compatibility surface and expose key presence only |
+| `openpets:codex-review-hooks` | Open an interactive Codex CLI session for user-owned hook review without approving hooks or writing trust state |
+| `openpets:codex-review-complete` | Refocus the existing Control Center after its read-only trust poll confirms approval |
 
 The `openpets:control-center-route` event and initial URL query use a normalized
 `{ route, petId?, section?, notice? }` request. `section: "companion"` is valid

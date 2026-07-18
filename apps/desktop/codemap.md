@@ -44,7 +44,7 @@ OpenPets desktop companion application. Tray-first Electron app providing animat
 
 ## Integration Points
 
-- **Workspace Packages**: `@open-pets/agent-events`, `@open-pets/claude`, `@open-pets/cli`, `@open-pets/cursor`, `@open-pets/mcp`, `@open-pets/opencode`
+- **Workspace Packages**: `@open-pets/agent-events`, `@open-pets/claude`, `@open-pets/cli`, `@open-pets/codex`, `@open-pets/cursor`, `@open-pets/mcp`, `@open-pets/opencode`
 - **External Services**: 
   - `https://openpets.dev/pets/catalog.v2.json` (pet catalog V2)
   - `https://openpets.dev/pets/catalog.v3.json` (pet catalog V3 with pagination)

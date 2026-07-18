@@ -37,6 +37,8 @@ OpenPets is a pnpm/TypeScript monorepo for an Electron desktop companion app plu
 | `packages/agent-events/src/` | Source implementation for agent event messages. | [View Map](packages/agent-events/src/codemap.md) |
 | `packages/claude/` | Claude Code integration package for hooks, MCP setup, and settings/memory management. | [View Map](packages/claude/codemap.md) |
 | `packages/claude/src/` | Claude Code hook handlers, hook settings, CLI integration, and exported setup APIs. | [View Map](packages/claude/src/codemap.md) |
+| `packages/codex/` | First-class Codex hook/MCP setup, trust diagnosis, migration, and bundled adapter. | [View Map](packages/codex/codemap.md) |
+| `packages/codex/src/` | Codex ownership, doctor/actions, hook runtime, and contract validation. | [View Map](packages/codex/src/codemap.md) |
 | `packages/client/` | IPC client package that discovers and communicates with the desktop app. | [View Map](packages/client/codemap.md) |
 | `packages/client/contracts/` | Client protocol contract tests for discovery, endpoint validation, responses, and pet result parsing. | [View Map](packages/client/contracts/codemap.md) |
 | `packages/client/src/` | Protocol definitions, discovery logic, public client API, and smoke entry points. | [View Map](packages/client/src/codemap.md) |
@@ -62,7 +64,7 @@ OpenPets is a pnpm/TypeScript monorepo for an Electron desktop companion app plu
 ## Architecture Flow
 
 1. The desktop app starts `apps/desktop/src/main.ts`, initializes app state, creates tray/task windows, and starts a local IPC server.
-2. Agent integrations (`packages/claude`, `packages/opencode`, `packages/cursor`, `packages/pi`, and `packages/mcp`) configure agents or emit pet commands through `@open-pets/client`.
+2. Agent integrations (`packages/claude`, `packages/codex`, `packages/opencode`, `packages/cursor`, `packages/pi`, and `packages/mcp`) configure agents or emit pet commands through `@open-pets/client`.
 3. The client discovers Unix sockets, Windows named pipes, or TCP endpoints for WSL cross-platform access.
 4. The desktop IPC server routes commands through lease-managed controllers so default and agent pets can coexist safely.
 5. The plugin service loads approved catalog or local `openpets.plugin.json` manifests, persists plugin state/config, schedules declarative timers, and bridges SDK v3 calls through permission-checked host modules for UI, audio, events, storage, AI, OAuth, voice, panels, and pet control.

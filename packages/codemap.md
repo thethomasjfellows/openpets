@@ -9,9 +9,10 @@ Provides modular, reusable components for the OpenPets ecosystem:
 - **agent-events**: Speech pools and validation for agent feedback messages
 - **client**: Core IPC client for communicating with OpenPets desktop app
 - **cli**: Main CLI tool for configuring agents, creating plugins from templates, and managing pets
-- **mcp**: MCP stdio server implementation for agent integration (status, reaction, speak)
+- **mcp**: MCP stdio server implementation for agent integration (status, reaction, speak, local media)
 - **opencode**: OpenCode editor integration (plugin hooks, config management)
 - **claude**: Claude Code integration (hook execution, config management)
+- **codex**: Codex integration (hook/MCP ownership, trust diagnosis, migration, runtime adapter)
 - **cursor**: Cursor editor integration (MCP configuration, project rules)
 - **pi**: Pi coding-agent extension integration (event handling, slash commands)
 - **install-pet**: Standalone pet installer from gallery catalog
@@ -42,7 +43,7 @@ CLI Entry (packages/cli/src/index.ts)
     └── Uses IPC client → @open-pets/client
 
 MCP Server (packages/mcp/src/index.ts)
-    ├── Registers tools (status, react, say)
+    ├── Registers tools (status, react, say, show media)
     └── Communicates via @open-pets/client
 
 OpenCode Plugin (packages/opencode/src/plugin.ts)
@@ -50,6 +51,9 @@ OpenCode Plugin (packages/opencode/src/plugin.ts)
 
 Claude Hooks (packages/claude/src/hooks.ts)
     └── Processes hook events → @open-pets/client
+
+Codex Hooks (packages/codex/src/hooks.ts)
+    └── Emits sanitized lifecycle events + reactions → @open-pets/client
 
 Cursor Setup (packages/cursor/src/cursor-project-setup.ts)
     └── Writes MCP config + rules → @open-pets/client
@@ -67,6 +71,7 @@ SDK Type definitions & Test Harness (packages/sdk/)
 **Inter-Package Dependencies**:
 - `cli` depends on: `client`, `claude`, `mcp`, `opencode`, `cursor`
 - `mcp` depends on: `client`
+- `codex` depends on: `client`
 - `claude` depends on: `client`, `agent-events`
 - `opencode` depends on: `client`, `agent-events`
 - `cursor` depends on: `client`

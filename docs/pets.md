@@ -123,9 +123,10 @@ builds one bounded prompt from the current pet identity, explicit profile, local
 time/activity state, recent memory, and consented plugin facts. It then calls
 either:
 
-- **Codex CLI** — validates the installed `codex exec --json`/resume contract,
-  maintains a cancellable session per pet, and retries a stale session once
-  statelessly; or
+- **Codex CLI** — becomes selectable only after the first-class Codex
+  integration is Connected, validates the installed `codex exec --json`/resume
+  contract, maintains a cancellable session per pet, and retries a stale session
+  once statelessly; or
 - **OpenPets AI provider** — uses the host's Anthropic, OpenAI, or Ollama-
   compatible provider configuration and explicit health probe.
 

@@ -6,6 +6,7 @@ import openPetsLogoUrl from "../../../assets/openpets.webp";
 import defaultThumbUrl from "../../../assets/default-pet-thumbnail.png";
 
 import claudeLogoUrl from "../../../assets/integrations/claude.svg";
+import codexLogoUrl from "../../../assets/integrations/codex.png";
 import opencodeLogoUrl from "../../../assets/integrations/opencode.svg";
 import cursorLogoUrl from "../../../assets/integrations/cursor.svg";
 import piLogoUrl from "../../../assets/integrations/pi.svg";
@@ -176,11 +177,13 @@ type ControlCenterApi = {
   onPluginsRefresh(callback: () => void): () => void;
   getIntegrationsState(selectedPetId?: string, commandMode?: "published" | "local" | "bundled"): Promise<AgentSetupSnapshot>;
   runIntegrationAction(action: AgentSetupAction, selectedPetId?: string, commandMode?: "published" | "local" | "bundled"): Promise<AgentSetupSnapshot>;
+  launchCodexHookReview(): Promise<{ ok: boolean; message: string }>;
+  completeCodexHookReview(): Promise<{ ok: boolean }>;
   updateIntegrationCommandPaths(patch: Partial<AgentSetupCommandPaths>): Promise<AgentSetupCommandPaths>;
 };
 
 
-type AgentSetupAction = "configure" | "replace" | "remove" | "install-memory" | "doctor-hooks" | "install-hooks" | "uninstall-hooks" | "opencode-install" | "opencode-remove" | "cursor-install" | "cursor-replace" | "cursor-remove";
+type AgentSetupAction = "configure" | "replace" | "remove" | "install-memory" | "doctor-hooks" | "install-hooks" | "uninstall-hooks" | "opencode-install" | "opencode-remove" | "cursor-install" | "cursor-replace" | "cursor-remove" | "codex-install" | "codex-repair" | "codex-disconnect" | "codex-refresh";
 type AgentSetupPetOption = { id: string; displayName: string; default: boolean };
 type ClaudeCodeStatus = { state: "detected" | "not_detected" | "configured" | "needs_setup" | "error"; label: string; details: string; claudeCommand?: string; version?: string; mcpListWorks: boolean; openPetsEntry: { present: boolean; verified: boolean; matchesExpected: boolean }; canConfigure: boolean; canReplace: boolean; canRemove: boolean };
 type ClaudeHookDoctorResult = { status: "installed" | "needs_setup" | "error" | "custom" | "conflict"; settingsPath: string; exists: boolean; valid: boolean; message: string; preview: Record<string, unknown>; asyncSupported: boolean; backupPath?: string };
@@ -189,9 +192,11 @@ type OpenCodeSetupStatus = { state: "configured" | "needs_setup" | "not_detected
 type OpenCodeSetupPreview = { global: true; configDir: string; configPath: string; cleanupConfigPaths: string[]; mcpCommand: string[]; plugin: unknown[] | string; instructionPath: string; configPreview: Record<string, unknown> };
 type CursorSetupStatus = { state: "configured" | "needs_setup" | "not_detected" | "error" | "conflict" | "needs_update"; label: string; details: string; configPath: string; canInstall: boolean; canReplace: boolean; canRemove: boolean };
 type CursorSetupPreview = { global: true; configPath: string; mcpEntry: Record<string, unknown>; rulesPath: string; rulesContent: string; commandMode: "published" | "local" | "bundled" };
-type AgentSetupCommandPaths = { claude: string; node: string; opencode: string };
+type CodexIntegrationState = "not_detected" | "installable" | "installing" | "waiting_for_trust" | "connected" | "needs_repair" | "conflict" | "unsupported";
+type CodexIntegrationSnapshot = { state: CodexIntegrationState; message: string; detected: boolean; command: string; version?: string; location?: string; supported: boolean; hooks: { state: string; trust: "missing" | "waiting" | "trusted" | "modified" | "unsupported"; path: string; installedEvents: string[] }; mcp: { state: string; serverName: "openpets"; command?: string; args?: string[] }; legacy: { detected: boolean; removable: boolean; details: string[] }; managedChanges: Array<{ id: string; path: string; title: string; detail: string; ownership: "managed" | "read_only" | "legacy"; present: boolean }>; canInstall: boolean; canRepair: boolean; canDisconnect: boolean; canRefresh: true };
+type AgentSetupCommandPaths = { claude: string; codex: string; node: string; opencode: string };
 type AgentSetupActionResult = { ok: boolean; action: AgentSetupAction; message: string; changed: boolean };
-type AgentSetupSnapshot = { selectedPetId?: string; commandMode: "published" | "local" | "bundled"; localDevAvailable: boolean; petOptions: AgentSetupPetOption[]; preview: { displayCommand: string; mcpJson: Record<string, unknown> }; status: ClaudeCodeStatus; hookStatus: ClaudeHookDoctorResult; memoryStatus: ClaudeOpenPetsMemoryStatus; opencodeStatus: OpenCodeSetupStatus; opencodePreview: OpenCodeSetupPreview; cursorStatus: CursorSetupStatus; cursorPreview: CursorSetupPreview; commandPaths: AgentSetupCommandPaths; busy: boolean; lastAction?: AgentSetupActionResult };
+type AgentSetupSnapshot = { selectedPetId?: string; commandMode: "published" | "local" | "bundled"; localDevAvailable: boolean; petOptions: AgentSetupPetOption[]; preview: { displayCommand: string; mcpJson: Record<string, unknown> }; status: ClaudeCodeStatus; hookStatus: ClaudeHookDoctorResult; memoryStatus: ClaudeOpenPetsMemoryStatus; opencodeStatus: OpenCodeSetupStatus; opencodePreview: OpenCodeSetupPreview; cursorStatus: CursorSetupStatus; cursorPreview: CursorSetupPreview; codexStatus: CodexIntegrationSnapshot; codexLastEvent?: { lifecycle: string; occurredAt: number; receivedAt: number }; commandPaths: AgentSetupCommandPaths; busy: boolean; lastAction?: AgentSetupActionResult };
 type StatusTone = keyof typeof statusPillToneClass;
 
 const api = (window as unknown as { openPetsControlCenter: ControlCenterApi }).openPetsControlCenter;
@@ -2281,6 +2286,7 @@ function PathField({ label, value, placeholder, onSave, disabled }: { label: str
 function IntegrationIcon({ id }: { id: string }) {
   const logos: Record<string, string> = {
     claude: claudeLogoUrl,
+    codex: codexLogoUrl,
     opencode: opencodeLogoUrl,
     cursor: cursorLogoUrl,
     pi: piLogoUrl,
@@ -2315,13 +2321,54 @@ function cursorStatusTone(state: CursorSetupStatus["state"]): StatusTone {
   return "slate";
 }
 
+function codexStatusTone(state: CodexIntegrationState): StatusTone {
+  if (state === "connected") return "green";
+  if (state === "conflict" || state === "unsupported") return "red";
+  if (state === "needs_repair") return "orange";
+  if (state === "installable" || state === "waiting_for_trust" || state === "installing") return "blue";
+  return "slate";
+}
+
+function codexStatusLabel(state: CodexIntegrationState, t: (key: string) => string): string {
+  const keys: Record<CodexIntegrationState, string> = {
+    not_detected: "integrations.codex.status.notDetected",
+    installable: "integrations.codex.status.ready",
+    installing: "integrations.codex.status.installing",
+    waiting_for_trust: "integrations.codex.status.waitingForTrust",
+    connected: "integrations.codex.status.connected",
+    needs_repair: "integrations.codex.status.needsRepair",
+    conflict: "integrations.codex.status.conflict",
+    unsupported: "integrations.codex.status.unsupported",
+  };
+  return t(keys[state]);
+}
+
+function codexTrustLabel(state: CodexIntegrationSnapshot["hooks"]["trust"], t: (key: string) => string): string {
+  const keys: Record<CodexIntegrationSnapshot["hooks"]["trust"], string> = {
+    missing: "integrations.codex.trust.missing",
+    waiting: "integrations.codex.trust.waiting",
+    trusted: "integrations.codex.trust.trusted",
+    modified: "integrations.codex.trust.modified",
+    unsupported: "integrations.codex.trust.unsupported",
+  };
+  return t(keys[state]);
+}
+
+function codexOwnershipLabel(ownership: CodexIntegrationSnapshot["managedChanges"][number]["ownership"], t: (key: string) => string): string {
+  if (ownership === "read_only") return t("integrations.codex.ownership.readOnly");
+  if (ownership === "legacy") return t("integrations.codex.ownership.legacy");
+  return t("integrations.codex.ownership.managed");
+}
+
 function IntegrationsView() {
   const { t } = useI18n();
   const [snapshot, setSnapshot] = useState<AgentSetupSnapshot | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [busy, setBusy] = useState("");
+  const [busy, setBusy] = useState<{ label: string; action?: AgentSetupAction | "codex-review" } | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [codexPollError, setCodexPollError] = useState("");
+  const [codexReviewOpened, setCodexReviewOpened] = useState(false);
 
   const load = async (selectedPetId?: string, commandMode?: AgentSetupSnapshot["commandMode"]) => {
     try {
@@ -2343,9 +2390,52 @@ function IntegrationsView() {
     return () => window.clearTimeout(timeout);
   }, [message]);
 
+  useEffect(() => {
+    if (selectedId !== "codex" || snapshot?.codexStatus.state !== "waiting_for_trust" || busy || snapshot.busy) return;
+    let cancelled = false;
+    let inFlight = false;
+    let consecutiveFailures = 0;
+
+    const poll = async () => {
+      if (cancelled || inFlight) return;
+      inFlight = true;
+      try {
+        const next = await api.getIntegrationsState(snapshot.selectedPetId, snapshot.commandMode);
+        if (cancelled) return;
+        consecutiveFailures = 0;
+        setCodexPollError("");
+        setSnapshot(next);
+        if (next.codexStatus.state === "connected") {
+          setError("");
+          setMessage(t("integrations.codex.approvalDetected"));
+          setCodexReviewOpened(false);
+          void api.completeCodexHookReview().catch(() => undefined);
+        }
+      } catch {
+        if (cancelled) return;
+        consecutiveFailures += 1;
+        if (consecutiveFailures >= 2) setCodexPollError(t("integrations.codex.pollFailed"));
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    const initialPoll = window.setTimeout(() => void poll(), 1500);
+    const interval = window.setInterval(() => void poll(), 3000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(initialPoll);
+      window.clearInterval(interval);
+    };
+  }, [selectedId, snapshot?.codexStatus.state, snapshot?.selectedPetId, snapshot?.commandMode, busy, snapshot?.busy, t]);
+
+  useEffect(() => {
+    if (snapshot?.codexStatus.state !== "waiting_for_trust") setCodexReviewOpened(false);
+  }, [snapshot?.codexStatus.state]);
+
   const run = async (label: string, action: AgentSetupAction) => {
     try {
-      setBusy(label);
+      setBusy({ label, action });
       setError("");
       setMessage("");
       const next = await api.runIntegrationAction(action, snapshot?.selectedPetId, snapshot?.commandMode);
@@ -2357,20 +2447,38 @@ function IntegrationsView() {
     } catch (err) {
       setError(String((err as Error)?.message ?? err));
     } finally {
-      setBusy("");
+      setBusy(null);
+    }
+  };
+
+  const launchCodexReview = async () => {
+    try {
+      setBusy({ label: t("integrations.codex.openingReview"), action: "codex-review" });
+      setError("");
+      setMessage("");
+      const result = await api.launchCodexHookReview();
+      if (result.ok) {
+        setCodexReviewOpened(true);
+        setMessage(result.message);
+      }
+      else setError(result.message);
+    } catch (err) {
+      setError(String((err as Error)?.message ?? err));
+    } finally {
+      setBusy(null);
     }
   };
 
   const updatePath = async (key: keyof AgentSetupCommandPaths, value: string) => {
     try {
-      setBusy(t("integrations.busy.savingPath"));
+      setBusy({ label: t("integrations.busy.savingPath") });
       await api.updateIntegrationCommandPaths({ [key]: value });
       await load();
       setMessage(t("integrations.toast.pathSaved"));
     } catch (err) {
       setError(String((err as Error)?.message ?? err));
     } finally {
-      setBusy("");
+      setBusy(null);
     }
   };
 
@@ -2388,10 +2496,12 @@ function IntegrationsView() {
   }
 
   const isBusy = Boolean(busy) || snapshot.busy;
+  const busyAction = busy?.action;
   const integrationDialogTitleId = selectedId ? `integration-detail-title-${selectedId}` : undefined;
 
   const integrations = [
     { id: "claude", name: t("integrations.claude.name"), icon: "claude", status: snapshot.status.label, tone: claudeStatusTone(snapshot.status.state), description: t("integrations.claude.description") },
+    { id: "codex", name: t("integrations.codex.name"), icon: "codex", status: codexStatusLabel(snapshot.codexStatus.state, t), tone: codexStatusTone(snapshot.codexStatus.state), description: t("integrations.codex.description") },
     { id: "opencode", name: t("integrations.opencode.name"), icon: "opencode", status: snapshot.opencodeStatus.label, tone: opencodeStatusTone(snapshot.opencodeStatus.state), description: t("integrations.opencode.description") },
     { id: "cursor", name: t("integrations.cursor.name"), icon: "cursor", status: snapshot.cursorStatus.label, tone: cursorStatusTone(snapshot.cursorStatus.state), description: t("integrations.cursor.description") },
     { id: "pi", name: t("integrations.pi.name"), icon: "pi", status: t("integrations.pi.status"), tone: "blue" satisfies StatusTone, description: t("integrations.pi.description") },
@@ -2404,6 +2514,7 @@ function IntegrationsView() {
   ];
 
   const selectedIntegrationName = selectedId === "pi" ? t("integrations.pi.name") : integrations.find((item) => item.id === selectedId)?.name;
+  const visibleCodexChanges = snapshot.codexStatus.managedChanges.filter((change) => change.id !== "legacy-plugin" || change.present);
 
   return (
     <div className="flex flex-col gap-6 h-full overflow-y-auto pr-2">
@@ -2428,6 +2539,7 @@ function IntegrationsView() {
             <div className="plugin-card-footer">
               <div className="flex gap-2 w-full">
                 {item.id === "claude" && snapshot.status.canConfigure && <Button variant="primary" size="compact" icon={<InstallIcon />} disabled={isBusy} onClick={() => run(t("integrations.busy.installing"), "configure")}>{t("integrations.install")}</Button>}
+                {item.id === "codex" && snapshot.codexStatus.canInstall && <Button variant="primary" size="compact" icon={<InstallIcon />} disabled={isBusy} onClick={() => { setSelectedId("codex"); void run(t("integrations.codex.connecting"), "codex-install"); }}>{busyAction === "codex-install" ? t("integrations.codex.connecting") : t("integrations.connect")}</Button>}
                 {item.id === "opencode" && snapshot.opencodeStatus.canInstall && <Button variant="primary" size="compact" icon={<InstallIcon />} disabled={isBusy} onClick={() => run(t("integrations.busy.installing"), "opencode-install")}>{t("integrations.install")}</Button>}
                 {item.id === "cursor" && snapshot.cursorStatus.canInstall && <Button variant="primary" size="compact" icon={<InstallIcon />} disabled={isBusy} onClick={() => run(t("integrations.busy.installing"), "cursor-install")}>{t("integrations.install")}</Button>}
                 <Button variant="secondary" size="compact" icon={<ConfigureIcon />} fullWidth={item.id === "pi"} onClick={() => setSelectedId(item.id)}>{item.id === "pi" ? t("integrations.viewSetup") : t("integrations.configure")}</Button>
@@ -2472,7 +2584,7 @@ function IntegrationsView() {
             </div>
 
             <div className="flex flex-col gap-5 mt-4">
-              {selectedId !== "pi" && (
+              {selectedId !== "pi" && selectedId !== "codex" && (
                 <section className="plugin-section">
                   <div className="plugin-section-title"><small>{t("integrations.commandSource")}</small><strong>{t("integrations.cliMode")}</strong></div>
                   <select className="settings-select w-full" value={snapshot.commandMode} disabled={isBusy} onChange={(event) => changeCommandMode(event.target.value as AgentSetupSnapshot["commandMode"])}>
@@ -2558,6 +2670,107 @@ function IntegrationsView() {
                     </pre>
                   </details>
 
+                </>
+              )}
+
+              {selectedId === "codex" && (
+                <>
+                  <section className="plugin-section codex-connection-card">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="plugin-section-title min-w-0">
+                        <small>{t("integrations.connection")}</small>
+                        <strong>{codexStatusLabel(snapshot.codexStatus.state, t)}</strong>
+                        <p className="text-xs text-slatecopy mt-1">{snapshot.codexStatus.message}</p>
+                      </div>
+                      <StatusPill tone={codexStatusTone(snapshot.codexStatus.state)}>{codexStatusLabel(snapshot.codexStatus.state, t)}</StatusPill>
+                    </div>
+
+                    <div className="codex-detection-grid">
+                      <div><small>{t("integrations.codex.detectedVersion")}</small><strong>{snapshot.codexStatus.version || "—"}</strong></div>
+                      <div className="min-w-0"><small>{t("integrations.codex.location")}</small><strong className="break-all">{snapshot.codexStatus.location || snapshot.codexStatus.command || t("integrations.codex.detectedAutomatically")}</strong></div>
+                    </div>
+
+                    <div className="codex-status-facts">
+                      <div><span>{t("integrations.codex.hookTrust")}</span><StatusPill tone={snapshot.codexStatus.hooks.trust === "trusted" ? "green" : snapshot.codexStatus.hooks.trust === "modified" ? "orange" : "blue"}>{codexTrustLabel(snapshot.codexStatus.hooks.trust, t)}</StatusPill></div>
+                      <div><span>{t("integrations.codex.lastEvent")}</span><strong>{snapshot.codexLastEvent ? `${snapshot.codexLastEvent.lifecycle} · ${new Date(snapshot.codexLastEvent.receivedAt).toLocaleString()}` : t("integrations.codex.noEvents")}</strong></div>
+                    </div>
+
+                    <div className="codex-action-bar">
+                      {snapshot.codexStatus.canInstall && <Button variant="primary" icon={<InstallIcon />} disabled={isBusy} onClick={() => run(t("integrations.codex.connecting"), "codex-install")}>{busyAction === "codex-install" ? t("integrations.codex.connecting") : t("integrations.connect")}</Button>}
+                      {snapshot.codexStatus.canRepair && <Button variant="warning" icon={<ReplaceIcon />} disabled={isBusy} onClick={() => run(t("integrations.codex.repairing"), "codex-repair")}>{busyAction === "codex-repair" ? t("integrations.codex.repairing") : t("integrations.repair")}</Button>}
+                      {snapshot.codexStatus.canDisconnect && <Button variant="danger" icon={<RemoveIcon />} disabled={isBusy} onClick={() => run(t("integrations.codex.removing"), "codex-disconnect")}>{busyAction === "codex-disconnect" ? t("integrations.codex.removing") : t("integrations.disconnect")}</Button>}
+                      <Button variant="secondary" icon={<RefreshIcon />} disabled={isBusy} onClick={() => run(t("integrations.codex.refreshing"), "codex-refresh")}>{busyAction === "codex-refresh" ? t("integrations.codex.refreshing") : t("integrations.refreshStatus")}</Button>
+                    </div>
+                    <p className="text-xs text-slatecopy">{t("integrations.codex.connectHelp")}</p>
+
+                    {selectedId === "codex" && error && <div className="error m-0" role="alert">{error}</div>}
+                    {selectedId === "codex" && message && <div className="settings-success settings-message m-0" role="status">{message}</div>}
+
+                    {snapshot.codexStatus.state === "waiting_for_trust" && (
+                      <div className="codex-approval-callout">
+                        <strong>{t("integrations.codex.approvalTitle")}</strong>
+                        <p>{t("integrations.codex.approvalIntro")}</p>
+                        <ol className="codex-approval-guide">
+                          <li><span>1</span><p>{t("integrations.codex.approvalUpdate")}</p></li>
+                          <li><span>2</span><p>{t("integrations.codex.approvalExactSix")}</p></li>
+                          <li><span>3</span><p>{t("integrations.codex.approvalDone")}</p></li>
+                        </ol>
+                        {codexReviewOpened ? (
+                          <div className="codex-review-opened" role="status">
+                            <strong>{t("integrations.codex.terminalOpened")}</strong>
+                            <p>{t("integrations.codex.terminalOpenedHelp")}</p>
+                            <Button variant="secondary" size="compact" disabled={isBusy} onClick={() => void launchCodexReview()}>{t("integrations.codex.openAgain")}</Button>
+                          </div>
+                        ) : (
+                          <div className="codex-approval-actions">
+                            <Button variant="primary" icon={<HookIcon />} fullWidth disabled={isBusy} onClick={() => void launchCodexReview()}>{busyAction === "codex-review" ? t("integrations.codex.openingReview") : t("integrations.codex.reviewInCodex")}</Button>
+                          </div>
+                        )}
+                        <p>{t("integrations.codex.approvalDifferentCount")}</p>
+                        {codexPollError && <p className="codex-approval-poll-error" role="status">{codexPollError}</p>}
+                        <p className="codex-approval-note">{t("integrations.codex.trustHelp")}</p>
+                      </div>
+                    )}
+                  </section>
+
+                  <section className="plugin-section">
+                    <div className="plugin-section-title"><small>{t("integrations.codex.capabilities")}</small><strong>{t("integrations.codex.whatThisEnables")}</strong></div>
+                    <div className="codex-capability-grid">
+                      <div className="codex-capability-card">
+                        <strong>{t("integrations.codex.activityReactions")}</strong>
+                        <p>{t("integrations.codex.activityReactionsDescription")}</p>
+                        <small>{t("integrations.codex.activityReactionsExample")}</small>
+                      </div>
+                      <div className="codex-capability-card">
+                        <strong>{t("integrations.codex.petControls")}</strong>
+                        <p>{t("integrations.codex.petControlsDescription")}</p>
+                        <small>{t("integrations.codex.petControlsExample")}</small>
+                      </div>
+                    </div>
+                  </section>
+
+                  <details className="plugin-section group">
+                    <summary className="cursor-pointer list-none flex items-center justify-between">
+                      <div className="plugin-section-title"><small>{t("integrations.codex.transparency")}</small><strong>{t("integrations.codex.whatChanges")}</strong></div>
+                      <span className="text-brand group-open:rotate-180 transition-transform"><NextIcon /></span>
+                    </summary>
+                    <p className="text-xs text-slatecopy">{t("integrations.codex.whatChangesHelp")}</p>
+                    <div className="flex flex-col gap-3 mt-3">
+                      {visibleCodexChanges.map((change) => <div key={change.id} className="p-3 rounded-xl bg-navy/5 border border-navy/5"><div className="flex justify-between gap-3"><strong className="text-sm">{change.title}</strong><StatusPill tone={change.present ? "green" : "slate"}>{change.present ? codexOwnershipLabel(change.ownership, t) : t("integrations.codex.willManage")}</StatusPill></div><small className="block text-slatecopy font-mono mt-1">{change.path}</small><p className="text-xs mt-2">{change.detail}</p></div>)}
+                    </div>
+                  </details>
+
+                  <details className="plugin-section group">
+                    <summary className="cursor-pointer list-none flex items-center justify-between">
+                      <div className="plugin-section-title"><small>{t("integrations.advanced")}</small><strong>{t("integrations.codex.troubleshooting")}</strong></div>
+                      <span className="text-brand group-open:rotate-180 transition-transform"><NextIcon /></span>
+                    </summary>
+                    <p className="text-xs text-slatecopy">{t("integrations.codex.commandPathsHelp")}</p>
+                    <div className="flex flex-col gap-3 mt-2">
+                      <PathField label={t("integrations.codexCommand")} value={snapshot.commandPaths.codex} placeholder={t("integrations.codex.detectedAutomatically")} onSave={(v) => updatePath("codex", v)} disabled={isBusy} />
+                      <PathField label={t("integrations.nodeCommand")} value={snapshot.commandPaths.node} placeholder={t("integrations.codex.detectedAutomatically")} onSave={(v) => updatePath("node", v)} disabled={isBusy} />
+                    </div>
+                  </details>
                 </>
               )}
 
@@ -3001,6 +3214,7 @@ function PetCompanionPanel({ petId, focusComposer, pushToTalkAvailable }: { petI
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const [settings, setSettings] = useState<CompanionSettings | null>(null);
   const [health, setHealth] = useState<CompanionTargetHealth | null>(null);
+  const [codexConnected, setCodexConnected] = useState(false);
   const [personality, setPersonality] = useState("");
   const [profileName, setProfileName] = useState("");
   const [preferredAddress, setPreferredAddress] = useState("");
@@ -3037,11 +3251,12 @@ function PetCompanionPanel({ petId, focusComposer, pushToTalkAvailable }: { petI
 
   useEffect(() => {
     let active = true;
-    void Promise.all([api.getCompanionSettings(), api.getVoiceSettings(), api.getVoiceListeningState()]).then(([next, voice, nextListening]) => {
+    void Promise.all([api.getCompanionSettings(), api.getVoiceSettings(), api.getVoiceListeningState(), api.getIntegrationsState()]).then(([next, voice, nextListening, integrations]) => {
       if (!active) return;
       applySettings(next);
       setPushToTalkEnabled(voice.listening.pushToTalkEnabled);
       applyListeningSnapshot(nextListening);
+      setCodexConnected(integrations.codexStatus.state === "connected");
     }).catch((error) => { if (active) setPanelError(String((error as Error)?.message ?? error)); });
     return () => { active = false; };
   }, [applyListeningSnapshot, applySettings]);
@@ -3133,7 +3348,7 @@ function PetCompanionPanel({ petId, focusComposer, pushToTalkAvailable }: { petI
           <div className="companion-field-actions"><span /><Button variant="secondary" size="compact" disabled={!!busyAction} onClick={() => void run("profile", async () => { await patchSettings({ profile: { name: profileName, preferredAddress, goals: goals.split(/\r?\n/).map((goal) => goal.trim()).filter(Boolean) } }, t("pets.companion.profileSaved")); })}>{t("pets.companion.saveProfile")}</Button></div>
 
           <div className="companion-options-grid">
-            <label className="companion-field"><span>{t("pets.companion.provider")}</span><select value={settings.target} onChange={(event) => void run("provider", async () => { await patchSettings({ target: event.target.value }, t("pets.companion.providerSaved")); })}><option value="codex">{t("pets.companion.provider.codex")}</option><option value="host-ai">{t("pets.companion.provider.hostAi")}</option></select></label>
+            <label className="companion-field"><span>{t("pets.companion.provider")}</span><select value={settings.target} onChange={(event) => void run("provider", async () => { await patchSettings({ target: event.target.value }, t("pets.companion.providerSaved")); })}><option value="codex" disabled={!codexConnected}>{codexConnected ? t("pets.companion.provider.codex") : t("pets.companion.provider.codexConnect")}</option><option value="host-ai">{t("pets.companion.provider.hostAi")}</option></select>{!codexConnected && <small>{t("pets.companion.provider.codexDisabled")}</small>}</label>
             <label className="companion-field"><span>{t("pets.companion.frequency")}</span><select value={settings.proactivity.frequency} onChange={(event) => void run("frequency", async () => { await patchSettings({ proactivity: { frequency: event.target.value } }, t("pets.companion.frequencySaved")); })}><option value="rarely">{t("pets.companion.frequency.rarely")}</option><option value="sometimes">{t("pets.companion.frequency.sometimes")}</option><option value="often">{t("pets.companion.frequency.often")}</option></select></label>
           </div>
           {health && !health.ready && health.reason && <p className="companion-health-note">{health.reason}</p>}

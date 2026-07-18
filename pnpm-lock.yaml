@@ -23,6 +23,9 @@ importers:
       '@open-pets/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@open-pets/codex':
+        specifier: workspace:*
+        version: link:../../packages/codex
       '@open-pets/cursor':
         specifier: workspace:*
         version: link:../../packages/cursor
@@ -148,6 +151,19 @@ importers:
         version: 6.0.3
 
   packages/client:
+    devDependencies:
+      '@types/node':
+        specifier: ^25.6.2
+        version: 25.6.2
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
+  packages/codex:
+    dependencies:
+      '@open-pets/client':
+        specifier: workspace:*
+        version: link:../client
     devDependencies:
       '@types/node':
         specifier: ^25.6.2

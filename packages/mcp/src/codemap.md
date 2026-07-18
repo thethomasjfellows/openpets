@@ -8,14 +8,14 @@ Source implementation for the OpenPets MCP stdio server, including argument pars
 
 - **Small Server Factory**: `server.ts` centralizes tool registration and MCP metadata; tool logic stays in `tools.ts`.
 - **Lease-Aware Tool Context**: `index.ts` acquires/heartbeats a pet lease and `tools.ts` reuses or reacquires it before mutating pet state.
-- **Strict Input Schemas**: Zod schemas constrain reactions and speech; `saySchema` rejects multiline/code/URL/path/secret-like content before calling the desktop client.
+- **Strict Input Schemas**: Zod schemas constrain reactions, speech, and media; `saySchema` rejects multiline/code/URL/path/secret-like content, while `showMediaSchema` requires an absolute supported image path.
 - **Sanitized Error Boundary**: User-facing tool errors redact IPC paths, tokens, socket names, and local filesystem details.
 
 ## Data & Control Flow
 
 1. `index.ts` parses `--pet`, `--help`, and `--version`, creates a client-backed tool context, and starts the stdio transport.
 2. Startup lease acquisition runs asynchronously; heartbeat keeps the configured pet route alive while the MCP server is connected.
-3. `server.ts` registers `openpets_status`, `openpets_react`, and `openpets_say` against handlers in `tools.ts`.
+3. `server.ts` registers `openpets_status`, `openpets_react`, `openpets_say`, and `openpets_show_media` against handlers in `tools.ts`.
 4. Handlers validate input, wait for lease readiness, acquire/reacquire a lease if needed, call `@open-pets/client`, and return text plus structured content.
 
 ## Integration Points
@@ -28,8 +28,8 @@ Source implementation for the OpenPets MCP stdio server, including argument pars
 ## Files
 
 - **index.ts**: Main entry (99 lines). Argument parsing, lease acquisition, heartbeat management, signal handling, graceful shutdown.
-- **server.ts**: MCP server factory (32 lines). `createOpenPetsMcpServer()` registers `openpets_status`, `openpets_react`, `openpets_say` tools with metadata.
-- **tools.ts**: Tool implementations. Zod schemas, `handleStatus()`, `handleReact()`, `handleSay()`, `createToolContext()`, `createMcpStatus()`, lease reacquisition, structured content, and error sanitization.
+- **server.ts**: MCP server factory. `createOpenPetsMcpServer()` registers status, reaction, speech, and local-media tools with metadata.
+- **tools.ts**: Tool implementations. Zod schemas, `handleStatus()`, `handleReact()`, `handleSay()`, `handleShowMedia()`, `createToolContext()`, `createMcpStatus()`, lease reacquisition, structured content, and error sanitization.
 - **args.ts**: CLI argument parsing (57 lines). `parseMcpArgs()`, `validatePetId()`, `createHelpText()`.
 - **ensure-executable.ts**: Post-build chmod for Unix (9 lines).
 - **check-mcp-contract.ts**: Contract validation (excluded from detailed documentation).

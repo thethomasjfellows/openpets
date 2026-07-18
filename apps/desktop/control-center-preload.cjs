@@ -79,6 +79,8 @@ const api = {
   },
   getIntegrationsState: (selectedPetId, commandMode) => ipcRenderer.invoke("openpets:agent-setup-snapshot", selectedPetId, commandMode),
   runIntegrationAction: (action, selectedPetId, commandMode) => ipcRenderer.invoke("openpets:agent-setup-action", action, selectedPetId, commandMode),
+  launchCodexHookReview: () => ipcRenderer.invoke("openpets:codex-review-hooks"),
+  completeCodexHookReview: () => ipcRenderer.invoke("openpets:codex-review-complete"),
   updateIntegrationCommandPaths: (patch) => ipcRenderer.invoke("openpets:agent-setup-command-paths", patch),
 };
 

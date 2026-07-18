@@ -273,6 +273,34 @@
   .integration-icon { @apply grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-xl border border-blue-100/70 bg-blue-50/70 text-brand shadow-sm; }
   .integration-logo { @apply h-8 w-8 object-contain; }
   .integration-icon svg { @apply w-6 h-6; }
+  .codex-connection-card { @apply border-brand/25 bg-gradient-to-br from-white via-blue-50/55 to-indigo-50/45; box-shadow: 0 12px 28px rgba(37, 99, 235, 0.08), inset 0 1px 0 rgba(255,255,255,0.9); }
+  .codex-detection-grid { @apply grid grid-cols-2 gap-2; }
+  .codex-detection-grid > div { @apply flex min-w-0 flex-col gap-0.5 rounded-xl border border-blue-100/60 bg-white/65 px-3 py-2.5; }
+  .codex-detection-grid small { @apply font-monoDisplay text-[10px] font-black uppercase tracking-wider text-slatecopy; }
+  .codex-detection-grid strong { @apply text-xs font-black text-navy; }
+  .codex-status-facts { @apply flex flex-col divide-y divide-blue-100/70 rounded-xl border border-blue-100/60 bg-white/65 px-3; }
+  .codex-status-facts > div { @apply flex items-center justify-between gap-3 py-2.5; }
+  .codex-status-facts span { @apply text-xs font-bold text-slatecopy; }
+  .codex-status-facts strong { @apply text-right text-xs text-navy; }
+  .codex-action-bar { @apply grid grid-cols-2 gap-2 border-t border-blue-100/70 pt-3; }
+  .codex-approval-callout { @apply rounded-2xl border border-amber-200/80 bg-amber-50/80 px-4 py-3 text-amber-900; }
+  .codex-approval-callout strong { @apply text-sm font-black; }
+  .codex-approval-callout p { @apply mb-0 mt-1 text-xs leading-relaxed; }
+  .codex-approval-actions { @apply my-3; }
+  .codex-approval-guide { @apply my-3 flex list-none flex-col gap-2 p-0; }
+  .codex-approval-guide li { @apply flex items-start gap-2; }
+  .codex-approval-guide li > span { @apply mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-amber-200/80 text-[10px] font-black; }
+  .codex-approval-guide li p { @apply mt-0; }
+  .codex-review-opened { @apply my-3 flex flex-col gap-2 rounded-xl border border-amber-200 bg-white/70 p-3; }
+  .codex-review-opened p { @apply mt-0; }
+  .codex-approval-poll-error { @apply text-red-700; }
+  .codex-approval-note { @apply border-t border-amber-200/80 pt-2 font-semibold; }
+  .codex-capability-grid { @apply grid grid-cols-2 gap-3; }
+  .codex-capability-card { @apply flex flex-col gap-2 rounded-2xl border border-blue-100/70 bg-white/70 p-4; }
+  .codex-capability-card > strong { @apply text-sm text-navy; }
+  .codex-capability-card > p { @apply m-0 text-xs leading-relaxed text-slatecopy; }
+  .codex-capability-card > small { @apply rounded-xl bg-blue-50/80 p-2.5 text-xs font-semibold leading-relaxed text-navy; }
+  @media (max-width: 640px) { .codex-detection-grid, .codex-action-bar, .codex-capability-grid { @apply grid-cols-1; } }
 
   /* Dashboard */
   .dashboard-layout { @apply flex flex-col gap-6 overflow-y-auto pr-2 pb-8 h-full; overscroll-behavior: contain; }

@@ -1,5 +1,6 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { allowedReactions, createOpenPetsClient, OpenPetsClientError, type OpenPetsClient, type OpenPetsLeaseResult, type OpenPetsReaction, type OpenPetsStatusResult } from "@open-pets/client";
+import { extname, isAbsolute } from "node:path";
 import { z } from "zod";
 
 export const reactionSchema = z.enum(allowedReactions);
@@ -14,6 +15,17 @@ export const saySchema = z.object({
 });
 
 export const reactSchema = z.object({ reaction: reactionSchema });
+
+const mediaExtensions = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif"]);
+export const showMediaSchema = z.object({
+  path: z.string().trim().min(1).max(2048)
+    .refine((value) => isAbsolute(value), "Media path must be absolute.")
+    .refine((value) => mediaExtensions.has(extname(value).toLowerCase()), "Media path must use a supported image extension."),
+  message: saySchema.shape.message.optional(),
+  reaction: reactionSchema.optional(),
+  durationMs: z.number().int().min(1_000).max(30_000).optional(),
+  clickUrl: z.string().trim().url().max(2048).optional(),
+});
 
 export interface OpenPetsMcpStatus {
   readonly [key: string]: unknown;
@@ -141,6 +153,30 @@ export async function handleSay(input: unknown, context: ToolContext): Promise<C
     };
   } catch (error) {
     return toolError(`OpenPets desktop app is not running or local IPC is unavailable. ${sanitizeError(error)}`);
+  }
+}
+
+export async function handleShowMedia(input: unknown, context: ToolContext): Promise<CallToolResult> {
+  await context.leaseReady;
+  const parsed = showMediaSchema.safeParse(input);
+  if (!parsed.success) return toolError("Invalid media request. Use an absolute PNG, JPG, WEBP, or GIF path and keep optional text safe and short.");
+  if (!(await ensureLease(context))) return toolError(`OpenPets lease is unavailable. ${sanitizeUnavailableReason(context.lease?.degradedReason) ?? "Open OpenPets and try again."}`);
+
+  try {
+    const client = context.client ?? createOpenPetsClient();
+    const result = await client.showMedia(parsed.data.path, {
+      message: parsed.data.message,
+      reaction: parsed.data.reaction,
+      durationMs: parsed.data.durationMs,
+      clickUrl: parsed.data.clickUrl,
+      leaseId: context.lease!.lease!.leaseId,
+    });
+    return {
+      content: [{ type: "text", text: "OpenPets media shown." }],
+      structuredContent: { ok: true, result },
+    };
+  } catch (error) {
+    return toolError(`OpenPets could not show that media. ${sanitizeError(error)}`);
   }
 }
 

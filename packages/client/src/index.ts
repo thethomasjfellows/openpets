@@ -3,10 +3,10 @@ import { randomUUID } from "node:crypto";
 import { posix, win32 } from "node:path";
 
 import { parseIpcEndpoint, readDiscoveryFile, type OpenPetsDiscoveryFile } from "./discovery.js";
-import { connectTimeoutMs, maxIpcMessageBytes, openPetsIpcVersion, parseIpcResponse, responseTimeoutMs, validateReaction, OpenPetsClientError, type OpenPetsIpcMethod, type OpenPetsIpcRequest, type OpenPetsReaction } from "./protocol.js";
+import { connectTimeoutMs, maxIpcMessageBytes, openPetsIpcVersion, parseIpcResponse, responseTimeoutMs, validateIntegrationLifecycle, validateReaction, OpenPetsClientError, type OpenPetsIntegrationLifecycle, type OpenPetsIpcMethod, type OpenPetsIpcRequest, type OpenPetsReaction } from "./protocol.js";
 
 export { getDiscoveryFilePath, parseIpcEndpoint, readDiscoveryFile, validateDiscovery, validateEndpoint, type OpenPetsDiscoveryFile, type ParsedIpcEndpoint } from "./discovery.js";
-export { allowedReactions, OpenPetsClientError, type OpenPetsReaction } from "./protocol.js";
+export { allowedIntegrationLifecycles, allowedReactions, OpenPetsClientError, type OpenPetsIntegrationLifecycle, type OpenPetsReaction } from "./protocol.js";
 
 /**
  * Stable per-process session nonce, generated once at module load.
@@ -73,6 +73,7 @@ export interface OpenPetsClient {
   react(reaction: OpenPetsReaction, options?: { readonly leaseId?: string }): Promise<unknown>;
   say(message: string, options?: { readonly reaction?: OpenPetsReaction; readonly leaseId?: string }): Promise<unknown>;
   showMedia(path: string, options?: { readonly message?: string; readonly reaction?: OpenPetsReaction; readonly durationMs?: number; readonly clickUrl?: string; readonly leaseId?: string }): Promise<unknown>;
+  recordIntegrationEvent?(event: { readonly integrationId: "codex"; readonly lifecycle: OpenPetsIntegrationLifecycle; readonly occurredAt: number }): Promise<unknown>;
 }
 
 export function createOpenPetsClient(options: OpenPetsClientOptions = {}): OpenPetsClient {
@@ -118,6 +119,16 @@ export function createOpenPetsClient(options: OpenPetsClientOptions = {}): OpenP
         throw new OpenPetsClientError("invalid_params", "Media path must be absolute.");
       }
       return sendDiscoveredRequest("pet.showMedia", { path: trimmedPath, message: mediaOptions?.message, reaction: mediaOptions?.reaction === undefined ? undefined : validateReaction(mediaOptions.reaction), durationMs: mediaOptions?.durationMs, clickUrl: mediaOptions?.clickUrl, leaseId: mediaOptions?.leaseId }, options);
+    },
+    recordIntegrationEvent: (event) => {
+      if (event.integrationId !== "codex" || !Number.isFinite(event.occurredAt)) {
+        throw new OpenPetsClientError("invalid_integration_event", "Invalid OpenPets integration event.");
+      }
+      return sendDiscoveredRequest("integration.event", {
+        integrationId: "codex",
+        lifecycle: validateIntegrationLifecycle(event.lifecycle),
+        occurredAt: event.occurredAt,
+      }, options);
     },
   };
 }

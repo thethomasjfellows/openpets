@@ -53,6 +53,7 @@
     "@open-pets/agent-events": "workspace:*",
     "@open-pets/claude": "workspace:*",
     "@open-pets/cli": "workspace:*",
+    "@open-pets/codex": "workspace:*",
     "@open-pets/cursor": "workspace:*",
     "@open-pets/mcp": "workspace:*",
     "@open-pets/opencode": "workspace:*",

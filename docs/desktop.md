@@ -293,7 +293,14 @@ the plugin is installed.
 
 `agent-setup.ts` detects installed agents and runs configuration actions (MCP
 add/replace/remove, hooks install/uninstall/doctor, memory file install),
-delegating to the integration packages. `claude-memory.ts` manages the Claude
+delegating to the integration packages. Its Codex path resolves the packaged
+`@open-pets/codex` hook adapter and `@open-pets/mcp` entry from ASAR-unpacked
+resources, exposes one Connect/Repair/Disconnect lifecycle, and performs
+replacement-first legacy migration. Codex command JSON is preserved internally
+for exact ownership checks, while renderer snapshots format home paths as `~`
+and omit packaged runtime locations. The modal keeps connection controls at the
+top and places command overrides in a collapsed troubleshooting disclosure.
+`claude-memory.ts` manages the Claude
 instructions file. See [agent-integrations.md](agent-integrations.md).
 
 ### Catalog & installation

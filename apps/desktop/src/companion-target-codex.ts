@@ -4,12 +4,28 @@ import type { CompanionTarget, CompanionTargetHealth, CompanionTargetRequest, Co
 export class CodexCompanionTarget implements CompanionTarget {
   readonly id = "codex" as const;
   readonly #target: CodexConversationTarget;
+  readonly #integrationStatus: () => Promise<{ readonly state: string }>;
 
-  constructor(target: CodexConversationTarget = new CodexConversationTarget()) {
+  constructor(
+    target: CodexConversationTarget = new CodexConversationTarget(),
+    integrationStatus: () => Promise<{ readonly state: string }> = async () => (await import("./agent-setup.js")).getCodexIntegrationStatus(),
+  ) {
     this.#target = target;
+    this.#integrationStatus = integrationStatus;
   }
 
   async health(force = false): Promise<CompanionTargetHealth> {
+    const integration = await this.#integrationStatus();
+    if (integration.state !== "connected") {
+      return {
+        targetId: "codex",
+        checkedAt: Date.now(),
+        configured: false,
+        ready: false,
+        method: "OpenPets Codex integration",
+        reason: "Connect Codex in Integrations before using Codex CLI as the Companion provider.",
+      };
+    }
     const health = await this.#target.health(force);
     return {
       ...health,
