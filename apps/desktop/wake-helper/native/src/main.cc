@@ -35,6 +35,10 @@ constexpr int32_t kSampleRate = 16000;
 constexpr std::size_t kMaxCommandLineBytes = 128 * 1024;
 constexpr std::size_t kMaxPhraseBytes = 480;
 constexpr std::size_t kMaxSamplesPerFrame = 16000;
+// Keep endpointing tolerant of natural mid-sentence pauses and aligned with
+// VoiceWakeActivation and voice-audio.ts, which both cap an utterance at 30s.
+constexpr float kVadMinSilenceDurationSeconds = 0.8F;
+constexpr float kVadMaxSpeechDurationSeconds = 30.0F;
 
 struct Arguments {
   enum class Mode { kWake, kTranscribe };
@@ -425,9 +429,11 @@ class Engine {
     SherpaOnnxVadModelConfig vad_config{};
     vad_config.silero_vad.model = arguments_.vad_model.c_str();
     vad_config.silero_vad.threshold = 0.5F;
-    vad_config.silero_vad.min_silence_duration = 0.35F;
+    vad_config.silero_vad.min_silence_duration =
+        kVadMinSilenceDurationSeconds;
     vad_config.silero_vad.min_speech_duration = 0.15F;
-    vad_config.silero_vad.max_speech_duration = 20.0F;
+    vad_config.silero_vad.max_speech_duration =
+        kVadMaxSpeechDurationSeconds;
     vad_config.silero_vad.window_size = 512;
     vad_config.sample_rate = kSampleRate;
     vad_config.num_threads = 1;

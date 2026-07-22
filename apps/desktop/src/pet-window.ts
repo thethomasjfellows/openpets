@@ -1275,7 +1275,7 @@ function createPetWindowCss(paused: boolean, scale: PetScaleValue): string {
     .stage { width: 100%; height: 100%; position: relative; box-sizing: border-box; overflow: visible; }
     .pet-hitbox { position: absolute; left: 50%; bottom: ${Math.max(0, petBottom - hitPadding)}px; z-index: 1; width: ${scaledWidth + hitPadding * 2}px; height: ${scaledHeight + hitPadding * 2}px; display: grid; place-items: center; transform: translateX(-50%); pointer-events: auto; -webkit-app-region: ${petDragRegion}; cursor: grab; }
     .pet-shell { position: relative; width: ${scaledWidth}px; height: ${scaledHeight}px; display: block; opacity: var(--pet-opacity); filter: ${petShellFilter}; transition-property: opacity, filter; transition-duration: 180ms; transition-timing-function: cubic-bezier(0.2, 0, 0, 1); pointer-events: auto; -webkit-app-region: ${petDragRegion}; cursor: grab; }
-    .bubble { position: absolute; left: 50%; bottom: ${bubbleBottom}px; z-index: 4; box-sizing: border-box; display: inline-flex; flex-direction: column; width: fit-content; min-width: 92px; max-width: min(220px, calc(100vw - 18px)); max-height: 128px; padding: 10px 12px; background: linear-gradient(135deg, rgba(239, 246, 255, 0.97), rgba(237, 233, 254, 0.96)); color: #172033; font: 760 11px/14px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-align: left; border: 1px solid rgba(255, 255, 255, 0.78); border-radius: 14px; box-shadow: 0 12px 24px rgba(15, 23, 42, 0.16), 0 2px 5px rgba(15, 23, 42, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.82); white-space: normal; overflow-wrap: break-word; word-break: normal; overflow: visible; pointer-events: auto; -webkit-app-region: no-drag; opacity: 1; backdrop-filter: ${bubbleBackdropFilter}; transform: translateX(-50%); transform-origin: 64% 100%; animation: bubble-in 180ms cubic-bezier(0.2, 0, 0, 1); }
+    .bubble { position: absolute; left: 50%; bottom: ${bubbleBottom}px; z-index: 4; box-sizing: border-box; display: inline-flex; flex-direction: column; width: fit-content; min-width: 92px; max-width: min(220px, calc(100vw - 18px)); max-height: 136px; padding: 10px 12px 13px; background: linear-gradient(135deg, rgba(239, 246, 255, 0.97), rgba(237, 233, 254, 0.96)); color: #172033; font: 760 11px/14px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-align: left; border: 1px solid rgba(255, 255, 255, 0.78); border-radius: 14px; box-shadow: 0 12px 24px rgba(15, 23, 42, 0.16), 0 2px 5px rgba(15, 23, 42, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.82); white-space: normal; overflow-wrap: break-word; word-break: normal; overflow: visible; pointer-events: auto; -webkit-app-region: no-drag; opacity: 1; backdrop-filter: ${bubbleBackdropFilter}; transform: translateX(-50%); transform-origin: 64% 100%; animation: bubble-in 180ms cubic-bezier(0.2, 0, 0, 1); }
     .bubble[data-dismiss-token] { cursor: pointer; }
     .bubble[data-close-only="true"] { cursor: default; }
     .bubble::after { content: ""; position: absolute; left: 64%; bottom: -7px; width: 12px; height: 12px; background: inherit; border-right: 1px solid rgba(255, 255, 255, 0.56); border-bottom: 1px solid rgba(255, 255, 255, 0.56); border-bottom-right-radius: 3px; transform: translateX(-50%) rotate(45deg); box-shadow: 3px 3px 7px rgba(15, 23, 42, 0.08); }
@@ -1286,25 +1286,25 @@ function createPetWindowCss(paused: boolean, scale: PetScaleValue): string {
     .bubble-status-icon svg { display: block; width: 14px; height: 14px; color: currentColor; }
     .bubble-status-icon img { display: block; width: 14px; height: 14px; object-fit: contain; }
     .bubble-status-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .bubble.has-close { padding: 12px 40px 12px 14px; }
+    .bubble.has-close { padding: 12px 40px 14px 14px; }
     .bubble.has-close.is-status-only { padding: 10px 40px 10px 14px; border-radius: 18px; }
     .bubble-close { position: absolute; right: 9px; top: 9px; z-index: 2; display: inline-grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 1px solid rgba(148, 163, 184, 0.32); border-radius: 999px; background: rgba(226, 232, 240, 0.97); color: #334155; font: 800 15px/20px Inter, ui-sans-serif, system-ui, sans-serif; box-shadow: 0 2px 6px rgba(15, 23, 42, 0.14); cursor: pointer; -webkit-app-region: no-drag; }
     .bubble-close:hover { background: rgba(239, 68, 68, 0.14); color: #b91c1c; }
     .bubble-close:focus-visible { outline: 2px solid rgba(239, 68, 68, 0.65); outline-offset: 1px; }
     .bubble-divider { height: 1px; width: 100%; margin: 8px 0; background: rgba(30, 58, 138, 0.12); }
-    .bubble-body { min-width: 0; width: 100%; color: #172033; font: 720 10.5px/13.5px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", "Malgun Gothic", "Apple SD Gothic Neo", "PingFang SC", "PingFang TC", "Microsoft YaHei", "Microsoft JhengHei", "Noto Sans CJK JP", "Noto Sans CJK KR", "Noto Sans CJK SC", "Noto Sans CJK TC", sans-serif; }
+    .bubble-body { min-width: 0; width: 100%; color: #172033; font: 720 11px/14.25px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", "Malgun Gothic", "Apple SD Gothic Neo", "PingFang SC", "PingFang TC", "Microsoft YaHei", "Microsoft JhengHei", "Noto Sans CJK JP", "Noto Sans CJK KR", "Noto Sans CJK SC", "Noto Sans CJK TC", sans-serif; }
     .bubble-text { display: -webkit-box; min-width: 0; overflow: hidden; -webkit-line-clamp: 4; -webkit-box-orient: vertical; text-wrap: normal; overflow-wrap: break-word; }
     .bubble.is-status-only { max-width: min(156px, calc(100vw - 18px)); padding: 8px 11px; border-radius: 999px; }
     .bubble.is-status-only .bubble-header { display: grid; grid-template-columns: 18px minmax(0, auto); align-items: center; justify-content: center; }
     .bubble.is-message-only { border-radius: 14px 14px 3px 14px; }
     .bubble.has-actions { min-width: min(176px, calc(100vw - 18px)); }
-    .bubble.is-long-message { max-width: min(220px, calc(100vw - 18px)); max-height: 138px; }
-    .bubble.is-long-message .bubble-text { -webkit-line-clamp: 6; font-size: 10px; line-height: 13px; }
-    .bubble.is-very-long-message { max-width: min(220px, calc(100vw - 18px)); max-height: 156px; }
-    .bubble.is-very-long-message .bubble-text { -webkit-line-clamp: 8; font-size: 9.5px; line-height: 12.5px; }
-    .bubble.is-conversation .bubble-body { font-size: 11.5px; line-height: 14.5px; }
-    .bubble.is-conversation.is-long-message .bubble-text { font-size: 10.75px; line-height: 13.75px; }
-    .bubble.is-conversation.is-very-long-message .bubble-text { font-size: 10.25px; line-height: 13.25px; }
+    .bubble.is-long-message { max-width: min(220px, calc(100vw - 18px)); max-height: 146px; }
+    .bubble.is-long-message .bubble-text { -webkit-line-clamp: 6; font-size: 10.5px; line-height: 13.5px; }
+    .bubble.is-very-long-message { max-width: min(220px, calc(100vw - 18px)); max-height: 164px; }
+    .bubble.is-very-long-message .bubble-text { -webkit-line-clamp: 8; font-size: 10px; line-height: 13px; }
+    .bubble.is-conversation .bubble-body { font-size: 12px; line-height: 15px; }
+    .bubble.is-conversation.is-long-message .bubble-text { font-size: 11.25px; line-height: 14.25px; }
+    .bubble.is-conversation.is-very-long-message .bubble-text { font-size: 10.75px; line-height: 13.75px; }
     .bubble.is-busy .bubble-status-icon { background: #3b82f6; box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.28), 0 2px 7px rgba(59, 130, 246, 0.34); }
     .bubble.is-waiting .bubble-status-icon { background: #f59e0b; box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.28), 0 2px 7px rgba(245, 158, 11, 0.34); }
     .bubble.is-success .bubble-status-icon { background: #10b981; box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.28), 0 2px 7px rgba(16, 185, 129, 0.34); }

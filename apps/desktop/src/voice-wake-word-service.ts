@@ -572,9 +572,9 @@ export class VoiceWakeWordService {
     this.#vadSpeechActive = event.state === "speech-start";
     this.#activation.vad(event.state);
     if (event.state === "speech-start" && this.#activation.turnState === "collecting") {
-      // This timer only protects against a wake hit followed by no command.
-      // Once command speech begins, VoiceWakeActivation's bounded 30-second
-      // utterance cap owns the safety limit instead of cutting off long input.
+      // The activation and follow-up timers only protect against no speech
+      // starting. Once either command starts, VAD endpointing and
+      // VoiceWakeActivation's bounded 30-second cap own completion.
       this.#clearActivationTimer();
       this.#clearFollowUpTimer();
       this.#state = { ...this.#state, turnState: "collecting" };

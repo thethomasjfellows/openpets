@@ -158,7 +158,7 @@ remain audible. The visual bubble remains authoritative.
 Wake conversation feedback uses that same pet bubble instead of a detached
 host overlay: a local wake hit shows **Listening** with a red activity pulse and
 an inset upper-right close control with reserved header and message space, endpointing replaces
-it with a visual **Let me check…** working state, and actual TTS playback shows
+it with a compact blue **Thinking** state, and actual TTS playback shows
 **Speaking** with a yellow activity pulse, the same close control, and a
 playback-driven progressive caption. System Voice uses
 native word-boundary events when available; audio providers reveal a
@@ -173,8 +173,9 @@ recorded but cannot replace the listening, working, or response bubble until
 that lease ends. After spoken output and the Companion turn both complete, the
 default-on follow-up preference immediately reopens that listening state for
 three seconds without displaying a countdown; the completed response remains
-below its red **Listening** header during that window. Speech onset keeps the
-turn open through VAD endpointing; silence clears the bubble and returns to
+below its red **Listening** header during that window. Speech onset clears the
+short no-speech timer; conversational endpointing tolerates natural pauses and
+keeps the turn open for up to 30 seconds. Silence before speech clears the bubble and returns to
 ordinary keyword detection. The bubble close control and the global **Control +
 backtick** shortcut cancel listening,
 transcription, provider generation, or speech without consuming Escape in the

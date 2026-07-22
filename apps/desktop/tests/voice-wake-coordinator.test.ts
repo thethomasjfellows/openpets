@@ -1052,6 +1052,14 @@ assert.deepEqual(followUpAcks, [
 ]);
 sendFollowUpEvent({ version: 2, type: "vad", state: "speech-start", score: 0.8 });
 sendFollowUpFrame();
+await new Promise<void>((resolve) => setTimeout(resolve, 40));
+assert.equal(
+  followUpService.snapshot().turnState,
+  "collecting",
+  "accepted follow-up speech outlives the short no-speech timer",
+);
+assert.deepEqual(followUpTurns, ["turn-1"], "follow-up waits for speech endpointing before transcription");
+sendFollowUpFrame();
 sendFollowUpEvent({ version: 2, type: "vad", state: "speech-end", score: 0.8 });
 await waitFor(() => followUpTurns.length === 2);
 assert.equal(followUpService.cancelConversation("test-shortcut"), true);

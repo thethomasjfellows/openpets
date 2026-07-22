@@ -130,9 +130,9 @@ export function initializeVoicePlatform(capabilities: ElectronPluginHostCapabili
         showThinking: ({ petId }) => {
           const window = getDefaultPetWindowForPlugins();
           if (window) setPetVoiceListeningState(window, "thinking");
-          showInstalledPetHostBubble(petId, "Let me check…", {
-            suppressNarration: true,
-            reaction: "working",
+            showInstalledPetHostBubble(petId, "", {
+              suppressNarration: true,
+              reaction: "thinking",
             durationMs: 30_000,
             showCloseButton: true,
             onDismiss: () => { wake.cancelConversation("bubble-close"); },
