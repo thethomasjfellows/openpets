@@ -9,11 +9,11 @@ import {
   enableCompanion,
   getCompanionSettings,
   initializeCompanionSettings,
-  maxCompanionGoals,
-  maxCompanionPersonalityCharacters,
+  companionCharacterFieldLimits,
+  maxCompanionAboutYouCharacters,
   normalizeCompanionSettings,
-  removeCompanionPetSettings,
-  updateCompanionPetSettings,
+  removeCompanionCharacterSettings,
+  updateCompanionCharacterSettings,
   updateCompanionSettings,
 } from "../src/companion-settings.js";
 
@@ -42,11 +42,11 @@ assert.equal(normalized.codex.model.length, 120);
 assert.equal(normalized.codex.reasoningEffort.length, 40);
 assert.equal(normalized.profile.name.length, 120);
 assert.equal(normalized.profile.preferredAddress, "");
-assert.equal(normalized.profile.goals.length, maxCompanionGoals);
-assert.equal(normalized.pets.pedra?.personality.length, maxCompanionPersonalityCharacters);
-assert.equal(normalized.pets["../../unsafe"], undefined);
+assert.ok(normalized.profile.aboutYou.length <= maxCompanionAboutYouCharacters);
+assert.match(normalized.profile.aboutYou, /Hydrate/);
+assert.equal(normalized.characters.pedra?.personality.length, companionCharacterFieldLimits.personality);
+assert.equal(normalized.characters["../../unsafe"], undefined);
 assert.equal(normalized.proactivity.frequency, "sometimes");
-assert.equal(normalized.context.screenEnabled, false);
 assert.equal(normalized.wake.followUpEnabled, true, "follow-up listening is the forward default for older settings files");
 
 const root = mkdtempSync(join(tmpdir(), "openpets-companion-settings-"));
@@ -62,18 +62,18 @@ try {
   assert.equal(getCompanionSettings().consentVersion, 0);
   assert.equal(getCompanionSettings().enabled, false);
 
-  updateCompanionPetSettings("pedra", { personality: "Curious, warm, and gently opinionated." });
+  updateCompanionCharacterSettings("pedra", { visibleName: "Pedra do Sol", personality: "Curious, warm, and gently opinionated." });
   const firstEnable = enableCompanion();
   assert.equal(firstEnable.consentVersion, 1);
   assert.equal(firstEnable.enabled, true);
   assert.equal(firstEnable.memory.enabled, true);
   assert.deepEqual(firstEnable.proactivity, { enabled: true, frequency: "sometimes" });
-  assert.deepEqual(firstEnable.context, { pluginEnabled: false, sensitivePluginEnabled: false, screenEnabled: false });
   assert.equal(firstEnable.wake.enabled, false);
   assert.equal(firstEnable.wake.followUpEnabled, true);
   assert.equal(firstEnable.profile.name, "Thomas");
   assert.equal(firstEnable.target, "host-ai");
-  assert.equal(firstEnable.pets.pedra?.personality, "Curious, warm, and gently opinionated.");
+  assert.equal(firstEnable.characters.pedra?.visibleName, "Pedra do Sol");
+  assert.equal(firstEnable.characters.pedra?.personality, "Curious, warm, and gently opinionated.");
 
   // Contract: the first-enable defaults are one complete persisted snapshot.
   const persisted = JSON.parse(readFileSync(join(root, companionSettingsFileName), "utf8")) as typeof firstEnable;
@@ -85,19 +85,16 @@ try {
   updateCompanionSettings({
     memory: { enabled: false },
     proactivity: { enabled: true, frequency: "rarely" },
-    context: { pluginEnabled: true, screenEnabled: true },
     wake: { enabled: true, followUpEnabled: false },
   });
   const reenabled = enableCompanion();
   assert.equal(reenabled.memory.enabled, false);
   assert.deepEqual(reenabled.proactivity, { enabled: true, frequency: "rarely" });
-  assert.equal(reenabled.context.pluginEnabled, true);
-  assert.equal(reenabled.context.screenEnabled, false);
   assert.equal(reenabled.wake.enabled, true, "explicit wake preference survives temporary runtime unavailability");
   assert.equal(reenabled.wake.followUpEnabled, false, "follow-up preference survives disable and re-enable");
 
-  removeCompanionPetSettings("pedra");
-  assert.equal(getCompanionSettings().pets.pedra, undefined);
+  removeCompanionCharacterSettings("pedra");
+  assert.equal(getCompanionSettings().characters.pedra, undefined);
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

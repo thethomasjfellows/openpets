@@ -6,29 +6,30 @@ import { companionFrequencies, companionTargetIds, type CompanionFrequency, type
 export type CompanionProfile = {
   readonly name: string;
   readonly preferredAddress: string;
-  readonly goals: readonly string[];
+  readonly aboutYou: string;
 };
 
-export type CompanionPetSettings = {
+export type CompanionCharacterProfile = {
+  readonly visibleName: string;
+  readonly species: string;
+  readonly origin: string;
+  readonly appearance: string;
   readonly personality: string;
+  readonly quirks: string;
+  readonly lifeStory: string;
 };
 
 export type CompanionSettings = {
-  readonly version: 1;
+  readonly version: 2;
   /** Version 0 has not accepted the Companion disclosure and therefore cannot be enabled. */
   readonly consentVersion: 0 | 1;
   readonly enabled: boolean;
   readonly target: CompanionTargetId;
   readonly codex: { readonly model: string; readonly reasoningEffort: string };
   readonly profile: CompanionProfile;
-  readonly pets: Readonly<Record<string, CompanionPetSettings>>;
+  readonly characters: Readonly<Record<string, CompanionCharacterProfile>>;
   readonly memory: { readonly enabled: boolean };
   readonly proactivity: { readonly enabled: boolean; readonly frequency: CompanionFrequency };
-  readonly context: {
-    readonly pluginEnabled: boolean;
-    readonly sensitivePluginEnabled: boolean;
-    readonly screenEnabled: boolean;
-  };
   readonly wake: { readonly enabled: boolean; readonly followUpEnabled: boolean };
 };
 
@@ -38,30 +39,33 @@ export type CompanionSettingsPatch = {
   readonly profile?: Partial<CompanionProfile>;
   readonly memory?: { readonly enabled?: boolean };
   readonly proactivity?: { readonly enabled?: boolean; readonly frequency?: CompanionFrequency };
-  readonly context?: {
-    readonly pluginEnabled?: boolean;
-    readonly sensitivePluginEnabled?: boolean;
-    readonly screenEnabled?: boolean;
-  };
   readonly wake?: { readonly enabled?: boolean; readonly followUpEnabled?: boolean };
 };
 
 export const maxCompanionGoals = 5;
 export const maxCompanionGoalCharacters = 240;
-export const maxCompanionPersonalityCharacters = 800;
-export const maxCompanionPetSettings = 200;
+export const maxCompanionAboutYouCharacters = 4_000;
+export const maxCompanionCharacterProfiles = 200;
+export const companionCharacterFieldLimits = {
+  visibleName: 120,
+  species: 160,
+  origin: 500,
+  appearance: 700,
+  personality: 900,
+  quirks: 700,
+  lifeStory: 1_200,
+} as const;
 
 export const defaultCompanionSettings: CompanionSettings = {
-  version: 1,
+  version: 2,
   consentVersion: 0,
   enabled: false,
   target: "codex",
   codex: { model: "", reasoningEffort: "" },
-  profile: { name: "", preferredAddress: "", goals: [] },
-  pets: {},
+  profile: { name: "", preferredAddress: "", aboutYou: "" },
+  characters: {},
   memory: { enabled: false },
   proactivity: { enabled: false, frequency: "sometimes" },
-  context: { pluginEnabled: false, sensitivePluginEnabled: false, screenEnabled: false },
   wake: { enabled: false, followUpEnabled: true },
 };
 
@@ -99,7 +103,6 @@ export function enableCompanion(): CompanionSettings {
       enabled: true,
       memory: { enabled: true },
       proactivity: { enabled: true, frequency: "sometimes" },
-      context: { pluginEnabled: false, sensitivePluginEnabled: false, screenEnabled: false },
       wake: { enabled: false, followUpEnabled: cached.wake.followUpEnabled },
     })
     : normalizeCompanionSettings({ ...cached, enabled: true });
@@ -119,28 +122,27 @@ export function updateCompanionSettings(patch: unknown): CompanionSettings {
   if (isRecord(patch.profile)) next.profile = { ...cached.profile, ...patch.profile };
   if (isRecord(patch.memory)) next.memory = { ...cached.memory, ...patch.memory };
   if (isRecord(patch.proactivity)) next.proactivity = { ...cached.proactivity, ...patch.proactivity };
-  if (isRecord(patch.context)) next.context = { ...cached.context, ...patch.context };
   if (isRecord(patch.wake)) next.wake = { ...cached.wake, ...patch.wake };
   return commitSettings(normalizeCompanionSettings(next));
 }
 
-export function updateCompanionPetSettings(petId: string, patch: unknown): CompanionSettings {
+export function updateCompanionCharacterSettings(petId: string, patch: unknown): CompanionSettings {
   assertSafeCompanionPetId(petId);
-  if (!isRecord(patch)) throw new Error("Invalid companion pet settings patch.");
-  const previous = cached.pets[petId] ?? { personality: "" };
-  const personality = normalizeText("personality" in patch ? patch.personality : previous.personality, maxCompanionPersonalityCharacters);
-  const pets = { ...cached.pets };
-  if (personality) pets[petId] = { personality };
-  else delete pets[petId];
-  return commitSettings(normalizeCompanionSettings({ ...cached, pets }));
+  if (!isRecord(patch)) throw new Error("Invalid companion character settings patch.");
+  const previous = cached.characters[petId] ?? emptyCompanionCharacterProfile();
+  const character = normalizeCharacterProfile({ ...previous, ...patch });
+  const characters = { ...cached.characters };
+  if (hasCharacterContent(character)) characters[petId] = character;
+  else delete characters[petId];
+  return commitSettings(normalizeCompanionSettings({ ...cached, characters }));
 }
 
-export function removeCompanionPetSettings(petId: string): CompanionSettings {
+export function removeCompanionCharacterSettings(petId: string): CompanionSettings {
   assertSafeCompanionPetId(petId);
-  if (!cached.pets[petId]) return cached;
-  const pets = { ...cached.pets };
-  delete pets[petId];
-  return commitSettings(normalizeCompanionSettings({ ...cached, pets }));
+  if (!cached.characters[petId]) return cached;
+  const characters = { ...cached.characters };
+  delete characters[petId];
+  return commitSettings(normalizeCompanionSettings({ ...cached, characters }));
 }
 
 export function onCompanionSettingsChanged(listener: (settings: CompanionSettings) => void): () => void {
@@ -153,13 +155,12 @@ export function normalizeCompanionSettings(value: unknown): CompanionSettings {
   const profile = isRecord(raw.profile) ? raw.profile : {};
   const memory = isRecord(raw.memory) ? raw.memory : {};
   const proactivity = isRecord(raw.proactivity) ? raw.proactivity : {};
-  const context = isRecord(raw.context) ? raw.context : {};
   const wake = isRecord(raw.wake) ? raw.wake : {};
   const codex = isRecord(raw.codex) ? raw.codex : {};
   const consentVersion = raw.consentVersion === 1 ? 1 : 0;
 
   return {
-    version: 1,
+    version: 2,
     consentVersion,
     enabled: consentVersion === 1 && raw.enabled === true,
     target: companionTargetIds.includes(raw.target as CompanionTargetId) ? raw.target as CompanionTargetId : "codex",
@@ -170,22 +171,15 @@ export function normalizeCompanionSettings(value: unknown): CompanionSettings {
     profile: {
       name: normalizeText(profile.name, 120),
       preferredAddress: normalizeText(profile.preferredAddress, 120),
-      goals: normalizeGoals(profile.goals),
+      aboutYou: normalizeAboutYou(profile.aboutYou, profile.goals),
     },
-    pets: normalizePetSettings(raw.pets),
+    characters: normalizeCharacterProfiles(raw.characters, raw.pets),
     memory: { enabled: memory.enabled === true },
     proactivity: {
       enabled: proactivity.enabled === true,
       frequency: companionFrequencies.includes(proactivity.frequency as CompanionFrequency)
         ? proactivity.frequency as CompanionFrequency
         : "sometimes",
-    },
-    context: {
-      pluginEnabled: context.pluginEnabled === true,
-      sensitivePluginEnabled: context.sensitivePluginEnabled === true,
-      // Screen awareness has no packaged capability yet. Never retain advance
-      // consent that could silently activate when a future plugin ships.
-      screenEnabled: false,
     },
     // Enabling wake remains an explicit user choice. Runtime availability is
     // checked separately so a missing or invalid bundle cannot arm the microphone.
@@ -197,16 +191,54 @@ export function assertSafeCompanionPetId(petId: string): void {
   if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(petId)) throw new Error(`Invalid companion pet id: ${petId}`);
 }
 
-function normalizePetSettings(value: unknown): Readonly<Record<string, CompanionPetSettings>> {
-  if (!isRecord(value)) return {};
-  const pets: Record<string, CompanionPetSettings> = {};
-  for (const [petId, entry] of Object.entries(value)) {
-    if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(petId) || !isRecord(entry)) continue;
-    const personality = normalizeText(entry.personality, maxCompanionPersonalityCharacters);
-    if (personality) pets[petId] = { personality };
-    if (Object.keys(pets).length >= maxCompanionPetSettings) break;
+export function emptyCompanionCharacterProfile(): CompanionCharacterProfile {
+  return { visibleName: "", species: "", origin: "", appearance: "", personality: "", quirks: "", lifeStory: "" };
+}
+
+function normalizeCharacterProfiles(value: unknown, legacyPets: unknown): Readonly<Record<string, CompanionCharacterProfile>> {
+  const source = isRecord(value) ? value : {};
+  const legacy = isRecord(legacyPets) ? legacyPets : {};
+  const characters: Record<string, CompanionCharacterProfile> = {};
+  const petIds = new Set([...Object.keys(legacy), ...Object.keys(source)]);
+  for (const petId of petIds) {
+    if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(petId)) continue;
+    const entry = isRecord(source[petId]) ? source[petId] : {};
+    const legacyEntry = isRecord(legacy[petId]) ? legacy[petId] : {};
+    const character = normalizeCharacterProfile({
+      ...entry,
+      personality: normalizeText(entry.personality, companionCharacterFieldLimits.personality)
+        || normalizeText(legacyEntry.personality, companionCharacterFieldLimits.personality),
+    });
+    if (hasCharacterContent(character)) characters[petId] = character;
+    if (Object.keys(characters).length >= maxCompanionCharacterProfiles) break;
   }
-  return pets;
+  return characters;
+}
+
+function normalizeCharacterProfile(value: unknown): CompanionCharacterProfile {
+  const raw = isRecord(value) ? value : {};
+  return {
+    visibleName: normalizeText(raw.visibleName, companionCharacterFieldLimits.visibleName),
+    species: normalizeText(raw.species, companionCharacterFieldLimits.species),
+    origin: normalizeText(raw.origin, companionCharacterFieldLimits.origin),
+    appearance: normalizeText(raw.appearance, companionCharacterFieldLimits.appearance),
+    personality: normalizeText(raw.personality, companionCharacterFieldLimits.personality),
+    quirks: normalizeText(raw.quirks, companionCharacterFieldLimits.quirks),
+    lifeStory: normalizeText(raw.lifeStory, companionCharacterFieldLimits.lifeStory),
+  };
+}
+
+function hasCharacterContent(character: CompanionCharacterProfile): boolean {
+  return Object.values(character).some(Boolean);
+}
+
+function normalizeAboutYou(value: unknown, legacyGoals: unknown): string {
+  const normalized = normalizeText(value, maxCompanionAboutYouCharacters);
+  if (normalized) return normalized;
+  const goals = normalizeGoals(legacyGoals);
+  return goals.length > 0
+    ? normalizeText(`Things I was working toward:\n${goals.map((goal) => `- ${goal}`).join("\n")}`, maxCompanionAboutYouCharacters)
+    : "";
 }
 
 function normalizeGoals(value: unknown): readonly string[] {

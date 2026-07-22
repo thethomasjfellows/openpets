@@ -96,7 +96,7 @@ export class CompanionProactiveService {
       const listening = this.#listening();
       const wake = this.#wake();
       const outputActivity = this.#outputActivity();
-      const candidates = buildCandidates({ now, dayPart: time.dayPart, localDateKey: time.localDateKey, goals: settings.profile.goals, opportunities: settings.context.pluginEnabled ? this.#opportunities() : [], visionOpportunities: this.#visionOpportunities(petId, now) });
+      const candidates = buildCandidates({ now, dayPart: time.dayPart, localDateKey: time.localDateKey, opportunities: this.#opportunities(), visionOpportunities: this.#visionOpportunities(petId, now) });
       const quiet = isInQuietHours(new Date(now));
       const wakeActive = wake.turnState !== "idle"
         || ["starting-capture", "starting-helper", "suspended", "recovering-device", "recovering-capture", "recovering-helper", "stopping"].includes(wake.captureState);
@@ -205,7 +205,6 @@ function buildCandidates(input: {
   readonly now: number;
   readonly dayPart: string;
   readonly localDateKey: string;
-  readonly goals: readonly string[];
   readonly opportunities: readonly CompanionProactiveOpportunity[];
   readonly visionOpportunities: readonly VisionProactiveOpportunity[];
 }): Array<{ candidate: CompanionProactiveCandidate; text: string; pluginFact?: CompanionPluginFact }> {
@@ -226,14 +225,6 @@ function buildCandidates(input: {
       text: opportunity.text,
     });
   }
-  if (input.goals.length > 0 && (input.dayPart === "midday" || input.dayPart === "afternoon" || input.dayPart === "evening")) {
-    const index = stableIndex(input.localDateKey, input.goals.length);
-    const goal = input.goals[index]!;
-    candidates.push({
-      candidate: { id: `goal:${input.localDateKey}:${index}`, dedupeKey: `goal:${input.localDateKey}:${index}`, source: "goal", expiresAt: endOfWindow },
-      text: `The user provided this current goal: ${JSON.stringify(goal)}. If it feels natural, make one gentle companion-style check-in about it. Do not sound like an alarm, schedule, or quantified reminder.`,
-    });
-  }
   if (["morning", "midday", "evening"].includes(input.dayPart)) {
     candidates.push({
       candidate: { id: `time:${input.localDateKey}:${input.dayPart}`, dedupeKey: `time:${input.localDateKey}:${input.dayPart}`, source: "time", expiresAt: endOfWindow },
@@ -241,12 +232,6 @@ function buildCandidates(input: {
     });
   }
   return candidates;
-}
-
-function stableIndex(value: string, size: number): number {
-  let hash = 0;
-  for (const character of value) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
-  return size > 0 ? hash % size : 0;
 }
 
 function cleanError(error: unknown): string {

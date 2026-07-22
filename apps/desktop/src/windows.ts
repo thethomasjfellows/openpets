@@ -1,4 +1,4 @@
-import { readFile, realpath, stat } from "node:fs/promises";
+import { lstat, readFile, realpath, stat } from "node:fs/promises";
 import { join, resolve, relative } from "node:path";
 import sharp from "sharp";
 
@@ -10,8 +10,8 @@ import { getAppStateSnapshot, getDesktopAnalyticsConsentState, normalizePetPoolO
 import { applyRoamingToAllPets } from "./pet-roaming-controller.js";
 import { classifyAnalyticsError, trackDesktopAnalyticsConsentChanged, trackDesktopEvent } from "./analytics.js";
 import { createAppIcon } from "./assets.js";
-import { clearCompanionMemory, removeCompanionMemoryForPet } from "./companion-memory.js";
-import { disableCompanion, enableCompanion, getCompanionSettings, removeCompanionPetSettings, updateCompanionPetSettings, updateCompanionSettings } from "./companion-settings.js";
+import { clearCompanionMemory, getCompanionMemorySnapshot, removeCompanionMemoryForPet } from "./companion-memory.js";
+import { companionCharacterFieldLimits, disableCompanion, enableCompanion, getCompanionSettings, removeCompanionCharacterSettings, updateCompanionCharacterSettings, updateCompanionSettings, type CompanionCharacterProfile } from "./companion-settings.js";
 import { companionTargetIds, type CompanionTargetId } from "./companion-types.js";
 import { getCodexAiBrain } from "./codex-ai-brain.js";
 import { getCatalogPageUiState, getCatalogSearchUiState, getCatalogUiState } from "./catalog.js";
@@ -70,6 +70,19 @@ function validateCompanionTargetId(value: unknown): CompanionTargetId {
 function validateDesktopPermissionKind(value: unknown): DesktopPermissionKind {
   if (value !== "microphone" && value !== "screen-recording") throw new Error("Invalid desktop permission.");
   return value;
+}
+
+function validateCompanionCharacterDraft(value: unknown): CompanionCharacterProfile {
+  if (!isPlainObject(value)) throw new Error("Invalid character draft.");
+  const field = (key: keyof CompanionCharacterProfile): string => {
+    const text = value[key];
+    if (typeof text !== "string") throw new Error(`Invalid character field: ${key}.`);
+    return text.replace(/\0/g, "").trim().slice(0, companionCharacterFieldLimits[key]);
+  };
+  return {
+    visibleName: field("visibleName"), species: field("species"), origin: field("origin"),
+    appearance: field("appearance"), personality: field("personality"), quirks: field("quirks"), lifeStory: field("lifeStory"),
+  };
 }
 
 async function validateCodexSettingsPatch(patch: unknown): Promise<unknown> {
@@ -316,14 +329,60 @@ export function installInternalUiHandlers(): void {
         throw error;
       }
     }
-    debug("companion", "settings updated", { enabled: settings.enabled, target: settings.target, memoryEnabled: settings.memory.enabled, proactivityEnabled: settings.proactivity.enabled, frequency: settings.proactivity.frequency, pluginContext: settings.context.pluginEnabled, sensitivePluginContext: settings.context.sensitivePluginEnabled, screenContext: settings.context.screenEnabled, wakeEnabled: settings.wake.enabled });
+    debug("companion", "settings updated", { enabled: settings.enabled, target: settings.target, memoryEnabled: settings.memory.enabled, proactivityEnabled: settings.proactivity.enabled, frequency: settings.proactivity.frequency, wakeEnabled: settings.wake.enabled });
     return settings;
   });
 
-  ipcMain.handle("openpets:companion-pet-settings-update", (event, petId: unknown, patch: unknown) => {
+  ipcMain.handle("openpets:companion-character-settings-update", (event, petId: unknown, patch: unknown) => {
     assertAllowedSender(event, ["control-center"]);
     if (typeof petId !== "string" || !getAppStateSnapshot().pets.installed.some((pet) => pet.id === petId && !pet.broken && !pet.brokenReason)) throw new Error("The selected pet is unavailable.");
-    return updateCompanionPetSettings(petId, patch);
+    return updateCompanionCharacterSettings(petId, patch);
+  });
+
+  ipcMain.handle("openpets:companion-memory-status", (event) => {
+    assertAllowedSender(event, ["control-center"]);
+    const snapshot = getCompanionMemorySnapshot();
+    return { entryCount: snapshot.entries.length, oldestCreatedAt: snapshot.entries[0]?.createdAt ?? null };
+  });
+
+  ipcMain.handle("openpets:companion-text-import", async (event) => {
+    assertAllowedSender(event, ["control-center"]);
+    const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+    const options: OpenDialogOptions = {
+      title: "Import text notes",
+      buttonLabel: "Import",
+      properties: ["openFile"],
+      filters: [{ name: "Text or Markdown", extensions: ["txt", "md", "markdown"] }],
+    };
+    const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
+    if (result.canceled || !result.filePaths[0]) return { canceled: true } as const;
+    const path = result.filePaths[0];
+    if (!/\.(?:txt|md|markdown)$/i.test(path)) throw new Error("Choose a .txt or .md file.");
+    const link = await lstat(path);
+    if (link.isSymbolicLink()) throw new Error("Choose the original text file instead of a symbolic link.");
+    const file = await stat(path);
+    if (!file.isFile() || file.size > 64 * 1_024) throw new Error("That file is too large. Choose a text file under 64 KB.");
+    const text = (await readFile(path, "utf8")).replace(/\0/g, "").trim();
+    if (!text) throw new Error("That file is empty.");
+    debug("companion", "text notes imported", { bytes: file.size });
+    return { canceled: false, text } as const;
+  });
+
+  ipcMain.handle("openpets:companion-character-generate", async (event, request: unknown) => {
+    assertAllowedSender(event, ["control-center"]);
+    if (!isPlainObject(request)
+      || typeof request.petId !== "string"
+      || (request.mode !== "complete" && request.mode !== "reimagine")) throw new Error("Invalid character generation request.");
+    const sourceText = typeof request.sourceText === "string" ? request.sourceText.replace(/\0/g, "").trim() : undefined;
+    if (sourceText && sourceText.length > 8_000) throw new Error("Character source notes must be 8,000 characters or fewer.");
+    const result = await requireVoicePlatform().companion.generateCharacterDraft({
+      petId: request.petId,
+      mode: request.mode,
+      draft: validateCompanionCharacterDraft(request.draft),
+      ...(sourceText ? { sourceText } : {}),
+    });
+    debug("companion", "character draft generated", { petId: request.petId, mode: request.mode, targetId: result.targetId });
+    return result;
   });
 
   ipcMain.handle("openpets:companion-memory-clear", (event, petId: unknown) => {
@@ -1040,7 +1099,7 @@ export function installInternalUiHandlers(): void {
     }
 
     const state = await removePet(petId);
-    removeCompanionPetSettings(petId);
+    removeCompanionCharacterSettings(petId);
     removeCompanionMemoryForPet(petId);
     getVoicePlatform()?.companion.cancel(petId);
     refreshDefaultPetContent();

@@ -34,8 +34,8 @@ const settings: CompanionSettings = {
   ...defaultCompanionSettings,
   consentVersion: 1,
   enabled: true,
-  profile: { name: "Thomas", preferredAddress: "Tom", goals: ["Take a real lunch break"] },
-  pets: { pedra: { personality: "Warm, observant, and playfully blunt." } },
+  profile: { name: "Thomas", preferredAddress: "Tom", aboutYou: "I try to take a real lunch break." },
+  characters: { pedra: { visibleName: "Pedra", species: "Solar sprite", origin: "A warm reef", appearance: "Flame hair", personality: "Warm, observant, and playfully blunt.", quirks: "Collects shiny pebbles", lifeStory: "Helped tend a lighthouse." } },
 };
 
 const appState = {
@@ -75,7 +75,7 @@ assert.deepEqual(speech, []);
 assert.deepEqual(bubbleNarrationSuppression, [false]);
 assert.match(lastPrompt, /Warm, observant, and playfully blunt/);
 assert.match(lastPrompt, /Thomas/);
-assert.match(lastPrompt, /Take a real lunch break/);
+assert.match(lastPrompt, /take a real lunch break/);
 assert.match(lastPrompt, /How are you doing/);
 
 // Contract: a voice conversation has one speech owner. Its visible bubble must
@@ -105,14 +105,10 @@ assert.equal((await unavailableOutputOrchestrator.sendUserTurn({ petId: "pedra",
 assert.doesNotThrow(() => unavailableOutputOrchestrator.cancel("pedra"));
 assert.doesNotThrow(() => unavailableOutputOrchestrator.dispose());
 
-const contextSettings: CompanionSettings = {
-  ...settings,
-  context: { ...settings.context, pluginEnabled: true },
-};
 const controlCenterOnly = new CompanionOrchestrator({
   targets: [target],
   output: output as never,
-  getSettings: () => contextSettings,
+  getSettings: () => settings,
   getAppState: () => appState as never,
   getPluginFacts: () => [
     { id: "fact:clock", pluginId: "test.plugin", sensitivity: "normal", text: "A deterministic fact.", expiresAt: 124_000 },
@@ -125,7 +121,7 @@ const panelResult = await controlCenterOnly.sendUserTurn({ petId: "pedra", text:
 assert.equal(panelResult.displayed, false);
 assert.ok(panelResult.displayToken);
 assert.match(lastPrompt, /A deterministic fact/, "context expiry uses the same captured clock as the turn");
-assert.doesNotMatch(lastPrompt, /A sensitive fact/, "sensitive plugin context remains excluded without its separate consent");
+assert.match(lastPrompt, /A sensitive fact/, "plugin permission and enabled state are the single context consent boundary");
 assert.equal(controlCenterOnly.acknowledgeDisplay("another-pet", panelResult.displayToken), false);
 assert.equal(controlCenterOnly.acknowledgeDisplay("pedra", panelResult.displayToken), true);
 assert.equal(controlCenterOnly.acknowledgeDisplay("pedra", panelResult.displayToken), false, "display acknowledgements are one-shot");
@@ -337,7 +333,7 @@ const petContextValidity = new CompanionOrchestrator({
 const hiddenPetTurn = petContextValidity.sendProactiveTurn({
   petId: "pedra",
   text: "A gentle goal check-in",
-  proactive: { candidateId: "goal:1", dedupeKey: "goal:1", source: "goal", expiresAt: 2_500 },
+  proactive: { candidateId: "time:1", dedupeKey: "time:1", source: "time", expiresAt: 2_500 },
 });
 const hiddenPetRejected = rejectsAsAbort(hiddenPetTurn);
 await petContextStarted.promise;
@@ -392,7 +388,7 @@ selectiveStarted = deferred<void>();
 const selectiveProactiveTurn = selective.sendProactiveTurn({
   petId: "pedra",
   text: "proactive turn",
-  proactive: { candidateId: "candidate:3", dedupeKey: "candidate:3", source: "goal", expiresAt: 3_000 },
+  proactive: { candidateId: "candidate:3", dedupeKey: "candidate:3", source: "vision", expiresAt: 3_000 },
 });
 const selectiveProactiveRejected = rejectsAsAbort(selectiveProactiveTurn);
 await selectiveStarted.promise;

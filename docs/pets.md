@@ -112,16 +112,27 @@ plugins speak in *reactions*, and the host owns *how* those look and sound.
 
 Companion Conversations is the host-owned, opt-in identity layer for installed
 pets. It is not an OpenAI/Codex agent profile and it is not the coding-agent
-reaction stream. Each installed pet can have a separate short personality
-(bounded to 800 input characters); the user profile is intentionally small and
-shared: name, preferred form of address, and up to five current goals. Goals are
-conversation context, not scheduled reminders. Removing a pet also removes that
-pet's personality, recent memory, and any live provider turn.
+reaction stream. Each installed pet can have a seven-field character overlay:
+visible name, species, origin, appearance, personality, quirks, and life story.
+The immutable asset ID and artwork remain unchanged. The shared user profile is
+name, preferred form of address, and freeform About You background. Removing a
+pet also removes that pet's character overlay, recent memory, and live turn.
+
+Pet Details edits a local draft and requires an explicit Save. **Complete
+Character** asks the selected AI Brain to fill only blank fields;
+**Reimagine Character** replaces all seven fields, including the visible name.
+Both use only the original package name/description, the editable draft, and
+optional imported `.txt`/`.md` source notes—never pet image analysis. Imported
+source notes are visible and transient, generated output is strictly validated
+as structured JSON, and closing Pet Details warns before discarding an unsaved
+draft. **Reset to original** restores an original-derived draft without touching
+the asset ID, sprites, or installed files.
 
 The first **Enable Companion** action is the disclosure boundary. It atomically
 enables roughly 24-hour recent memory and gentle proactive check-ins at
-**Sometimes**. Plugin context, sensitive plugin context, listening, and Vision
-remain off until the user makes each separate choice. Vision uses dedicated
+**Sometimes**. A plugin may contribute only when it is enabled and its sensitive
+`companion:context` permission was approved; there is no second global context
+toggle. Listening and Vision remain separate choices. Vision uses dedicated
 fresh consent state rather than the former Companion screen placeholder, so
 advance screen consent is never retained. Ambient pre-wake audio is not
 recorded, persisted, transcribed, or sent to a provider.
@@ -151,7 +162,7 @@ turn. Memory rolls for 24 hours and is additionally capped at 200 total entries,
 recent subset in each prompt. The user can clear one pet's memory at any time.
 
 Check-ins apply to the visible, unpaused default pet. Host candidates come from
-morning/midday/evening timing and the user's explicit goals; enabled plugins
+morning/midday/evening timing; enabled, approved plugins
 may add expiring opportunities, and recent opt-in Vision summaries may add
 privacy-constrained context-aware opportunities. Quiet hours and any active
 listening, thinking, or speaking suppress them. Rarely/Sometimes/Often are

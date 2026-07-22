@@ -142,10 +142,10 @@ user approval, runtime permission check, and quotas all apply.
 
 The `companion:context` permission unlocks three SDK calls:
 `ctx.companion.contributeFact`, `offerOpportunity`, and `remove`. Permission
-approval alone is not consent to disclose data. The host accepts normal
-contributions only while Companion and **Plugin context** are enabled, and
-sensitive contributions additionally require **Sensitive plugin context**.
-The permission is classified as sensitive at both manifest validation and UI
+approval is the plugin-specific disclosure boundary: the host accepts
+contributions only while Companion and that plugin are enabled. There is no
+duplicate global Plugin context or Sensitive plugin context switch. The
+permission is classified as sensitive at both manifest validation and UI
 approval boundaries because its text may be placed in an AI prompt.
 Disabled plugins are ignored and their retained contributions are cleared on
 teardown. Calls are rate-limited to 20 per minute.

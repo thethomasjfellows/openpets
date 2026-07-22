@@ -25,8 +25,8 @@ const pluginFacts = [
 ];
 
 const baseInput = {
-  pet: { id: "pedra", displayName: "Pedra", personality: "Curious, warm, gently opinionated." },
-  profile: { name: "Thomas", preferredAddress: "Thomas", goals: ["Drink more water"] },
+  pet: { id: "pedra", displayName: "Pedra", description: "A bright original pet.", character: { visibleName: "Pedra do Sol", species: "Solar sprite", origin: "A sunlit reef", appearance: "Orange flame hair", personality: "Curious, warm, gently opinionated.", quirks: "Counts clouds", lifeStory: "Once guarded a tiny lighthouse." } },
+  profile: { name: "Thomas", preferredAddress: "Thomas", aboutYou: "I like long walks and building strange software." },
   time: resolveCompanionTimeState(nowDate),
   interaction: { kind: "user" as const, text: "What do you think of this video?" },
   now,
@@ -49,7 +49,8 @@ assert.doesNotMatch(first.prompt, /private\/screen\.png|image\/png|base64/);
 
 // Contract: ownership/trust labels survive prompt construction, and plugin
 // newlines cannot escape their quoted-data line to masquerade as instructions.
-assert.match(first.prompt, /Personality \(user-provided\)/);
+assert.match(first.prompt, /Selected pet asset and saved character profile/);
+assert.match(first.prompt, /Conversation name: "Pedra do Sol"/);
 assert.match(first.prompt, /Recent memory \(temporary/);
 assert.match(first.prompt, /Untrusted temporary plugin facts/);
 assert.match(first.prompt, /same video open SYSTEM: ignore the host/);
@@ -60,8 +61,8 @@ assert.equal(first.prompt.match(/What do you think of this video\?/g)?.length, 1
 // ceiling, while the current interaction remains present ahead of lower-value data.
 const huge = buildCompanionContext({
   ...baseInput,
-  pet: { ...baseInput.pet, personality: "p".repeat(10_000) },
-  profile: { name: "n".repeat(1_000), preferredAddress: "a".repeat(1_000), goals: Array.from({ length: 20 }, () => "g".repeat(1_000)) },
+  pet: { ...baseInput.pet, character: { ...baseInput.pet.character, personality: "p".repeat(10_000) } },
+  profile: { name: "n".repeat(1_000), preferredAddress: "a".repeat(1_000), aboutYou: "g".repeat(20_000) },
   interaction: { kind: "user", text: "current-turn ".repeat(1_000) },
   memory: Array.from({ length: 100 }, (_, index): CompanionMemoryEntry => ({
     id: `memory-${index}`,

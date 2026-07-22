@@ -134,11 +134,9 @@ if (!gotSingleInstanceLock) {
     const paths = parseDevPluginEnv(process.env.OPENPETS_DEV_PLUGIN_PATHS);
     const devPluginMode = roots.length > 0 || paths.length > 0;
     const companionContributions = new CompanionContributionStore({
-      canContribute: ({ sensitivity }) => {
+      canContribute: () => {
         const companion = getCompanionSettings();
-        return companion.enabled
-          && companion.context.pluginEnabled
-          && (sensitivity === "normal" || companion.context.sensitivePluginEnabled);
+        return companion.enabled && companion.consentVersion === 1;
       },
       isPluginEnabled: (pluginId) => {
         try { return getPluginService().stateStore.getRecord(pluginId)?.enabled === true; }

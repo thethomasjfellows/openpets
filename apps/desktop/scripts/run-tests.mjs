@@ -30,6 +30,7 @@ const behaviorTests = [
   ".test-dist/tests/vision-store.test.js",
   ".test-dist/tests/vision-service.test.js",
   ".test-dist/tests/companion-settings.test.js",
+  ".test-dist/tests/companion-character-generation.test.js",
   ".test-dist/tests/companion-memory.test.js",
   ".test-dist/tests/companion-context.test.js",
   ".test-dist/tests/companion-time-proactivity.test.js",

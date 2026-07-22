@@ -225,6 +225,16 @@
   .companion-field input, .companion-field textarea, .companion-field select, .companion-composer textarea { @apply w-full rounded-xl border border-blue-200/80 bg-white/90 px-3 py-2 text-sm font-medium text-navy outline-none transition focus:border-brand focus:ring-4 focus:ring-brand/15; }
   .companion-field textarea, .companion-composer textarea { @apply resize-y leading-relaxed; }
   .companion-field-actions { @apply flex items-center justify-between gap-3 text-[11px] font-semibold text-slatecopy; }
+  .settings-row-stack { @apply flex-col items-stretch; }
+  .companion-unsaved { @apply w-full rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800; }
+  .character-action-bar, .character-save-bar { @apply flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-blue-100 bg-white/70 p-4; }
+  .character-action-bar > div:first-child { @apply flex min-w-[240px] flex-1 flex-col; }
+  .character-action-bar small { @apply mt-1 text-xs font-normal leading-relaxed text-slatecopy; }
+  .character-save-bar { @apply sticky bottom-0 z-10 border-blue-200 bg-white/95 shadow-lg backdrop-blur; }
+  .character-save-bar strong { @apply text-sm text-amber-800; }
+  .character-save-bar span { @apply text-sm text-slatecopy; }
+  .character-count { @apply self-end text-[10px] font-semibold text-slatecopy; }
+  .plugin-permission-note { @apply m-0 rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-xs leading-relaxed text-slatecopy; }
   .companion-profile-grid, .companion-options-grid { @apply grid grid-cols-1 gap-3 sm:grid-cols-2; }
   .companion-toggles { @apply grid grid-cols-1 gap-2 sm:grid-cols-2; }
   .companion-health-note { @apply -mt-2 mb-0 rounded-xl border border-amber-200/70 bg-amber-50/70 px-3 py-2 text-xs leading-relaxed text-amber-800; }

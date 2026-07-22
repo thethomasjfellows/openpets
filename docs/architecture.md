@@ -82,7 +82,7 @@ These are the flows worth holding in memory. Each links to the doc that details 
   the main-process `CompanionOrchestrator`. When the user enables Listen, the
   host validates the target-specific local Sherpa bundle before it can arm the
   shared microphone capture. It builds bounded context from the default pet's
-  personality, the explicit user profile, local time/activity hints, recent
+  seven-field character profile, the explicit About You profile, local time/activity hints, recent
   pet-scoped memory, and consented
   plugin facts. The selected target is either a cancellable Codex CLI session or
   the configured host-AI provider. Only a response actually displayed in the
@@ -94,7 +94,7 @@ These are the flows worth holding in memory. Each links to the doc that details 
     wake listening remains KWS/VAD-only; only the following bounded command is
     transcribed and reaches Codex.
 - **Proactive opportunity → restrained check-in.** A host-owned scheduler
-  evaluates time-of-day, user goals, consented plugin opportunities, and recent
+  evaluates time-of-day, consented plugin opportunities, and recent
   opt-in Vision summaries for the visible, unpaused default pet. Quiet hours,
   active listening/thinking/speech, dedupe, daily caps, and the
   Rarely/Sometimes/Often spacing policy can suppress
@@ -132,7 +132,7 @@ boundary, not a temporary missing feature.
 
 The boundary keeps the pet's responsibilities coherent:
 
-- **Conversation:** personality, explicit profile, recent pet-scoped memory,
+- **Conversation:** a coherent per-pet character profile, explicit About You profile, recent pet-scoped memory,
   and natural spoken interaction.
 - **Awareness:** local time/activity plus separately consented Vision and plugin
   context, always supplied as bounded untrusted observations.
@@ -184,10 +184,12 @@ These hold everywhere; the rest of the docs assume them.
   the user's Codex skills, MCP servers, plugins, shell, project rules, or
   repository context. Bounded everyday actions belong to permission-checked
   OpenPets plugins; serious agent work stays in the agent application.
-- **Companion data is consented and layered.** Core settings, pet personality,
+- **Companion data is consented and layered.** Core settings, the saved character profile,
   explicit profile fields, and roughly 24 hours of recent conversation are
-  OpenPets-owned. Plugin context, sensitive plugin context, Vision, and wake
-  listening are separate gates. Vision starts off, occasionally captures the
+  OpenPets-owned. Plugin context requires an enabled plugin with approved
+  `companion:context`; disabling that plugin stops its contributions without a
+  duplicate global switch. Vision and wake listening remain separate gates.
+  Vision starts off, occasionally captures the
     visible display only after explicit consent, sends the image to the selected
     AI Brain (official Codex image input or a direct API provider) for a bounded summary, and retains both locally for no more
   than 24 hours. Summary text is always passed to providers as untrusted quoted
@@ -195,7 +197,7 @@ These hold everywhere; the rest of the docs assume them.
   local-only, and unavailable
   when its packaged bundle fails validation.
 - **Providers do not own identity.** Codex CLI and host AI receive the same
-  bounded host-built context. They do not own the pet personality, user profile,
+  bounded host-built context. They do not own the character profile, user profile,
   recent-memory retention, plugin consent, or proactive-delivery policy.
 
 ## Glossary

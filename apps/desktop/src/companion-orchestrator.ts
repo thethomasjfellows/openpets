@@ -1,12 +1,17 @@
 import { buildCompanionContext, type CompanionPluginFact, type CompanionVisionSummary } from "./companion-context.js";
 import {
+  buildCompanionCharacterGenerationPrompt,
+  parseCompanionCharacterDraft,
+  type CompanionCharacterGenerationMode,
+} from "./companion-character-generation.js";
+import {
   commitCompanionAssistantTurn,
   commitCompanionProactiveTurn,
   commitCompanionUserTurn,
   selectRecentCompanionMemory,
   type CompanionProactiveMemoryMetadata,
 } from "./companion-memory.js";
-import { getCompanionSettings } from "./companion-settings.js";
+import { getCompanionSettings, type CompanionCharacterProfile } from "./companion-settings.js";
 import type { CompanionTarget, CompanionTargetHealth, CompanionTargetResult } from "./companion-targets.js";
 import { resolveCompanionTimeState } from "./companion-time.js";
 import type { CompanionTargetId } from "./companion-types.js";
@@ -15,7 +20,7 @@ import type { VoiceOutputService } from "./voice-output-service.js";
 type CompanionVoiceOutput = Pick<VoiceOutputService, "speak" | "cancel">;
 type CompanionLog = (level: "debug" | "info" | "warn", message: string, fields?: Record<string, unknown>) => void;
 type CompanionAppStateSnapshot = {
-  readonly pets: { readonly installed: ReadonlyArray<{ readonly id: string; readonly displayName: string; readonly broken?: boolean; readonly brokenReason?: string }> };
+  readonly pets: { readonly installed: ReadonlyArray<{ readonly id: string; readonly displayName: string; readonly description?: string; readonly broken?: boolean; readonly brokenReason?: string }> };
   readonly analytics: { readonly lastActivityAt?: number };
 };
 
@@ -131,6 +136,40 @@ export class CompanionOrchestrator {
 
   async sendProactiveTurn(request: Omit<CompanionTurnRequest, "kind" | "proactive"> & { readonly proactive: CompanionProactiveTurnMetadata }): Promise<CompanionTurnResult> {
     return this.#send({ ...request, kind: "proactive" });
+  }
+
+  async generateCharacterDraft(request: {
+    readonly petId: string;
+    readonly mode: CompanionCharacterGenerationMode;
+    readonly draft: CompanionCharacterProfile;
+    readonly sourceText?: string;
+  }): Promise<{ readonly draft: CompanionCharacterProfile; readonly targetId: CompanionTargetId }> {
+    const settings = this.#getSettings();
+    if (!settings.enabled || settings.consentVersion !== 1) throw new Error("Enable Companion before generating a character.");
+    const pet = this.#getAppState().pets.installed.find((candidate) => candidate.id === request.petId && !candidate.broken && !candidate.brokenReason);
+    if (!pet) throw new Error("The selected pet is no longer available.");
+    const target = this.#targets.get(settings.target);
+    if (!target) throw new Error("The selected AI Brain is unavailable.");
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 45_000);
+    timeout.unref?.();
+    try {
+      const health = await waitForAbort(target.health(), controller.signal);
+      if (!health.ready) throw new Error(health.reason ?? "The selected AI Brain is not ready.");
+      const prompt = buildCompanionCharacterGenerationPrompt({
+        mode: request.mode,
+        pet: { id: pet.id, displayName: pet.displayName, ...(pet.description ? { description: pet.description } : {}) },
+        draft: request.draft,
+        ...(request.sourceText === undefined ? {} : { sourceText: request.sourceText }),
+      });
+      const result = await waitForAbort(target.send({ prompt, signal: controller.signal }), controller.signal);
+      return { draft: parseCompanionCharacterDraft(result.text, request), targetId: target.id };
+    } catch (error) {
+      if (controller.signal.aborted) throw new Error("Character generation took too long. Try again.");
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   cancel(petId: string): void {
@@ -257,16 +296,13 @@ export class CompanionOrchestrator {
 
       const memory = settings.memory.enabled ? selectRecentCompanionMemory({ petId: pet.id, now: turnNow }) : [];
       const context = buildCompanionContext({
-        pet: { id: pet.id, displayName: pet.displayName, personality: settings.pets[pet.id]?.personality },
+        pet: { id: pet.id, displayName: pet.displayName, ...(pet.description ? { description: pet.description } : {}), character: settings.characters[pet.id] },
         profile: settings.profile,
         memory,
         time: resolveCompanionTimeState(new Date(turnNow), appState.analytics.lastActivityAt),
         interaction: { kind: request.kind === "proactive" ? "proactive" : "user", text },
         visionSummaries: this.#visionSummaries(pet.id, turnNow),
-        pluginFacts: settings.context.pluginEnabled
-          ? [...this.#pluginFacts(pet.id), ...this.#pluginFactsById(pet.id, request.pluginFactIds ?? [])]
-              .filter((fact) => fact.sensitivity !== "sensitive" || settings.context.sensitivePluginEnabled)
-          : [],
+        pluginFacts: [...this.#pluginFacts(pet.id), ...this.#pluginFactsById(pet.id, request.pluginFactIds ?? [])],
         now: turnNow,
       });
 

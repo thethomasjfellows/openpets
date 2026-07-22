@@ -95,19 +95,20 @@ type VisionSnapshot = {
 };
 type CompanionFrequency = "rarely" | "sometimes" | "often";
 type CompanionTargetId = "codex" | "host-ai";
+type CompanionCharacterProfile = { visibleName: string; species: string; origin: string; appearance: string; personality: string; quirks: string; lifeStory: string };
 type CompanionSettings = {
-  version: 1;
+  version: 2;
   consentVersion: 0 | 1;
   enabled: boolean;
   target: CompanionTargetId;
   codex: { model: string; reasoningEffort: string };
-  profile: { name: string; preferredAddress: string; goals: readonly string[] };
-  pets: Readonly<Record<string, { personality: string }>>;
+  profile: { name: string; preferredAddress: string; aboutYou: string };
+  characters: Readonly<Record<string, CompanionCharacterProfile>>;
   memory: { enabled: boolean };
   proactivity: { enabled: boolean; frequency: CompanionFrequency };
-  context: { pluginEnabled: boolean; sensitivePluginEnabled: boolean; screenEnabled: boolean };
   wake: { enabled: boolean; followUpEnabled: boolean };
 };
+type CompanionMemoryStatus = { entryCount: number; oldestCreatedAt: number | null };
 type CompanionTargetHealth = { targetId: CompanionTargetId; checkedAt: number; configured: boolean; ready: boolean; method: string; provider?: string; model?: string; version?: string; reason?: string };
 type CodexModelInfo = { id: string; model: string; displayName: string; description: string; hidden: boolean; isDefault: boolean; inputModalities: string[]; defaultReasoningEffort: string; supportedReasoningEfforts: Array<{ value: string; description: string }> };
 type CodexModelDiscoverySnapshot = { checkedAt: number; status: "ready" | "not_detected" | "unsupported" | "error"; models: CodexModelInfo[]; defaultModelId?: string; reason?: string };
@@ -205,7 +206,10 @@ type ControlCenterApi = {
   enableCompanion(): Promise<CompanionSettings>;
   disableCompanion(): Promise<CompanionSettings>;
   updateCompanionSettings(patch: Record<string, unknown>): Promise<CompanionSettings>;
-  updateCompanionPetSettings(petId: string, patch: { personality?: string }): Promise<CompanionSettings>;
+  updateCompanionCharacterSettings(petId: string, patch: Partial<CompanionCharacterProfile>): Promise<CompanionSettings>;
+  getCompanionMemoryStatus(): Promise<CompanionMemoryStatus>;
+  importCompanionText(): Promise<{ canceled: true } | { canceled: false; text: string }>;
+  generateCompanionCharacter(request: { petId: string; mode: "complete" | "reimagine"; draft: CompanionCharacterProfile; sourceText?: string }): Promise<{ draft: CompanionCharacterProfile; targetId: CompanionTargetId }>;
   clearCompanionMemory(petId?: string): Promise<{ ok: true }>;
   getCompanionTargetHealth(targetId?: CompanionTargetId, force?: boolean): Promise<CompanionTargetHealth>;
   getCodexModels(force?: boolean): Promise<CodexModelDiscoverySnapshot>;
@@ -1190,6 +1194,65 @@ function ReactionPreviewSprite({ settings, state }: { settings: ReactionAnimatio
   );
 }
 
+function MemorySettingsPanel({ busy, run, setMessage, onDirtyChange }: { busy: boolean; run: (label: string, fn: () => Promise<void>) => Promise<void>; setMessage: (message: string) => void; onDirtyChange: (dirty: boolean) => void }) {
+  const { t } = useI18n();
+  const [companion, setCompanion] = useState<CompanionSettings | null>(null);
+  const [memoryStatus, setMemoryStatus] = useState<CompanionMemoryStatus | null>(null);
+  const [name, setName] = useState("");
+  const [preferredAddress, setPreferredAddress] = useState("");
+  const [aboutYou, setAboutYou] = useState("");
+
+  const apply = React.useCallback((next: CompanionSettings) => {
+    setCompanion(next);
+    setName(next.profile.name);
+    setPreferredAddress(next.profile.preferredAddress);
+    setAboutYou(next.profile.aboutYou);
+  }, []);
+
+  useEffect(() => {
+    void Promise.all([api.getCompanionSettings(), api.getCompanionMemoryStatus()]).then(([next, status]) => {
+      apply(next); setMemoryStatus(status);
+    });
+  }, [apply]);
+
+  const dirty = companion !== null && (name !== companion.profile.name || preferredAddress !== companion.profile.preferredAddress || aboutYou !== companion.profile.aboutYou);
+  useEffect(() => { onDirtyChange(dirty); return () => onDirtyChange(false); }, [dirty, onDirtyChange]);
+  const frequency = companion?.proactivity.enabled ? companion.proactivity.frequency : "off";
+  const memoryAge = memoryStatus?.oldestCreatedAt ? Math.max(1, Math.ceil((Date.now() - memoryStatus.oldestCreatedAt) / 3_600_000)) : 0;
+
+  return <div className="settings-section">
+    <p className="eyebrow">{t("settings.memory.eyebrow")}</p>
+    <h2 className="settings-section-title">{t("settings.memory.title")}</h2>
+    <p className="text-sm text-slatecopy -mt-2 mb-2">{t("settings.memory.description")}</p>
+
+    {!companion ? <div className="settings-group"><div className="settings-row"><div className="settings-row-info"><strong>{t("common.loading")}</strong></div></div></div> : <>
+      {!companion.enabled && <div className="companion-disclosure">
+        <strong>{t("settings.memory.enableTitle")}</strong><p>{t("settings.memory.enableDescription")}</p>
+        <Button variant="primary" disabled={busy} onClick={() => void run(t("settings.busy.saving"), async () => { apply(await api.enableCompanion()); setMessage(t("pets.companion.enabled")); })}>{t("pets.companion.enable")}</Button>
+      </div>}
+
+      <div className="settings-group companion-memory-form">
+        <div className="settings-row settings-row-stack">
+          <div className="settings-row-info"><strong>{t("settings.memory.aboutTitle")}</strong><small>{t("settings.memory.aboutDescription")}</small></div>
+          <div className="companion-profile-grid w-full">
+            <label className="companion-field"><span>{t("pets.companion.yourName")}</span><input value={name} maxLength={120} onChange={(event) => setName(event.target.value)} placeholder={t("settings.memory.namePlaceholder")} /></label>
+            <label className="companion-field"><span>{t("pets.companion.addressYouAs")}</span><input value={preferredAddress} maxLength={120} onChange={(event) => setPreferredAddress(event.target.value)} placeholder={t("settings.memory.addressPlaceholder")} /></label>
+          </div>
+          <label className="companion-field w-full"><span>{t("settings.memory.aboutYou")}</span><small>{t("settings.memory.aboutYouDescription")}</small><textarea value={aboutYou} maxLength={4000} rows={7} onChange={(event) => setAboutYou(event.target.value)} placeholder={t("settings.memory.aboutYouPlaceholder")} /></label>
+          <div className="companion-field-actions w-full"><span>{aboutYou.length}/4000</span><div className="flex gap-2"><Button variant="secondary" size="compact" disabled={busy} onClick={() => void run(t("settings.memory.importing"), async () => { const result = await api.importCompanionText(); if (result.canceled) return; if (result.text.length > 4000) throw new Error(t("settings.memory.importTooLong")); setAboutYou(result.text); })}>{t("settings.memory.import")}</Button><Button variant="primary" size="compact" disabled={busy || !dirty} onClick={() => void run(t("settings.busy.saving"), async () => { apply(await api.updateCompanionSettings({ profile: { name, preferredAddress, aboutYou } })); setMessage(t("pets.companion.profileSaved")); })}>{dirty ? t("settings.memory.saveDraft") : t("common.saved")}</Button></div></div>
+          {dirty && <div className="companion-unsaved">{t("settings.memory.unsaved")}</div>}
+        </div>
+      </div>
+
+      <div className="settings-group">
+        <ToggleRow title={t("settings.memory.recentTitle")} description={t("settings.memory.recentDescription")} checked={companion.memory.enabled} disabled={busy || !companion.enabled} onChange={(checked) => void run(t("settings.busy.saving"), async () => { apply(await api.updateCompanionSettings({ memory: { enabled: checked } })); setMessage(t("pets.companion.preferencesSaved")); })} />
+        <div className="settings-row"><div className="settings-row-info"><strong>{t("settings.memory.statusTitle")}</strong><small>{memoryStatus?.entryCount ? t("settings.memory.statusEntries", { count: memoryStatus.entryCount, hours: memoryAge }) : t("settings.memory.statusEmpty")}</small></div><Button variant="secondary" size="compact" disabled={busy || !memoryStatus?.entryCount} onClick={() => void run(t("settings.busy.saving"), async () => { await api.clearCompanionMemory(); setMemoryStatus(await api.getCompanionMemoryStatus()); setMessage(t("pets.companion.memoryCleared")); })}>{t("settings.memory.clear")}</Button></div>
+        <div className="settings-row"><div className="settings-row-info"><strong>{t("settings.memory.checkIns")}</strong><small>{t("settings.memory.checkInsDescription")}</small></div><select className="settings-select" value={frequency} disabled={busy || !companion.enabled} onChange={(event) => void run(t("settings.busy.saving"), async () => { const value = event.target.value; apply(await api.updateCompanionSettings({ proactivity: value === "off" ? { enabled: false } : { enabled: true, frequency: value } })); setMessage(t("pets.companion.frequencySaved")); })}><option value="off">{t("settings.memory.off")}</option><option value="rarely">{t("pets.companion.frequency.rarely")}</option><option value="sometimes">{t("pets.companion.frequency.sometimes")}</option><option value="often">{t("pets.companion.frequency.often")}</option></select></div>
+      </div>
+    </>}
+  </div>;
+}
+
 function SettingsView({ onNavigate }: { onNavigate: (route: Route) => void }) {
   const { t, localePreference, availableLocales, reload: reloadI18n } = useI18n();
   const [settings, setSettings] = useState<SettingsState | null>(null);
@@ -1197,7 +1260,7 @@ function SettingsView({ onNavigate }: { onNavigate: (route: Route) => void }) {
   const [launchAtLogin, setLaunchAtLogin] = useState<LaunchAtLoginState | null>(null);
   const [lanStatus, setLanStatus] = useState<LanStatusSnapshot | null>(null);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
-  const [activeTab, setActiveTab] = useState<"general" | "reactions" | "plugins" | "lan" | "listen" | "speak" | "vision" | "ai-brain">("general");
+  const [activeTab, setActiveTab] = useState<"general" | "reactions" | "memory" | "plugins" | "lan" | "listen" | "speak" | "vision" | "ai-brain">("general");
   const [pluginsSnapshot, setPluginsSnapshot] = useState<PluginServiceSnapshot | null>(null);
   const [platformSettings, setPlatformSettings] = useState<PluginPlatformSettings | null>(null);
   const [hostAiSettings, setHostAiSettings] = useState<HostAiSettingsSnapshot | null>(null);
@@ -1206,8 +1269,13 @@ function SettingsView({ onNavigate }: { onNavigate: (route: Route) => void }) {
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [memoryDirty, setMemoryDirty] = useState(false);
   const reactionSaveQueue = useRef(Promise.resolve());
   const settingsContentRef = useRef<HTMLElement | null>(null);
+  const switchSettingsTab = (next: typeof activeTab) => {
+    if (activeTab === "memory" && memoryDirty && !window.confirm(t("settings.memory.discardConfirm"))) return;
+    setActiveTab(next);
+  };
 
   async function loadSettings() {
     setError("");
@@ -1328,35 +1396,39 @@ function SettingsView({ onNavigate }: { onNavigate: (route: Route) => void }) {
 
     <div className="settings-container">
       <aside className="settings-sidebar">
-        <button className={`settings-nav-item ${activeTab === "general" ? "active" : ""}`} onClick={() => setActiveTab("general")}>
+        <button className={`settings-nav-item ${activeTab === "general" ? "active" : ""}`} onClick={() => switchSettingsTab("general")}>
           <SettingsIcon />
           <span>{t("settings.nav.general")}</span>
         </button>
-        <button className={`settings-nav-item ${activeTab === "reactions" ? "active" : ""}`} onClick={() => setActiveTab("reactions")}>
+        <button className={`settings-nav-item ${activeTab === "reactions" ? "active" : ""}`} onClick={() => switchSettingsTab("reactions")}>
           <PetsIcon />
           <span>{t("settings.nav.reactions")}</span>
         </button>
-        <button className={`settings-nav-item ${activeTab === "ai-brain" ? "active" : ""}`} onClick={() => setActiveTab("ai-brain")}>
+        <button className={`settings-nav-item ${activeTab === "ai-brain" ? "active" : ""}`} onClick={() => switchSettingsTab("ai-brain")}>
           <SettingsIcon />
           <span>{t("settings.nav.aiBrain")}</span>
         </button>
-        <button className={`settings-nav-item ${activeTab === "listen" ? "active" : ""}`} onClick={() => setActiveTab("listen")}>
+        <button className={`settings-nav-item ${activeTab === "memory" ? "active" : ""}`} onClick={() => switchSettingsTab("memory")}>
+          <PetsIcon />
+          <span>{t("settings.nav.memory")}</span>
+        </button>
+        <button className={`settings-nav-item ${activeTab === "listen" ? "active" : ""}`} onClick={() => switchSettingsTab("listen")}>
           <VolumeIcon />
           <span>{t("settings.nav.listen")}</span>
         </button>
-        <button className={`settings-nav-item ${activeTab === "speak" ? "active" : ""}`} onClick={() => setActiveTab("speak")}>
+        <button className={`settings-nav-item ${activeTab === "speak" ? "active" : ""}`} onClick={() => switchSettingsTab("speak")}>
           <VolumeIcon />
           <span>{t("settings.nav.speak")}</span>
         </button>
-        <button className={`settings-nav-item ${activeTab === "vision" ? "active" : ""}`} onClick={() => setActiveTab("vision")}>
+        <button className={`settings-nav-item ${activeTab === "vision" ? "active" : ""}`} onClick={() => switchSettingsTab("vision")}>
           <IntegrationsIcon />
           <span>{t("settings.nav.vision")}</span>
         </button>
-        <button className={`settings-nav-item ${activeTab === "plugins" ? "active" : ""}`} onClick={() => setActiveTab("plugins")}>
+        <button className={`settings-nav-item ${activeTab === "plugins" ? "active" : ""}`} onClick={() => switchSettingsTab("plugins")}>
           <PluginsIcon />
           <span>{t("settings.nav.plugins")}</span>
         </button>
-        <button className={`settings-nav-item ${activeTab === "lan" ? "active" : ""}`} onClick={() => setActiveTab("lan")}>
+        <button className={`settings-nav-item ${activeTab === "lan" ? "active" : ""}`} onClick={() => switchSettingsTab("lan")}>
           <IntegrationsIcon />
           <span>{t("settings.nav.lan")}</span>
         </button>
@@ -1567,6 +1639,8 @@ function SettingsView({ onNavigate }: { onNavigate: (route: Route) => void }) {
             setMessage={setMessage}
           />
         )}
+
+        {activeTab === "memory" && <MemorySettingsPanel busy={!!busy} run={run} setMessage={setMessage} onDirtyChange={setMemoryDirty} />}
 
         {activeTab === "plugins" && (
           <div className="settings-section">
@@ -3767,6 +3841,7 @@ function PluginsView() {
               </label>
               {installed.source === "local" && installed.sourcePath && <div className="plugin-source-path"><small>{t("plugins.inspector.sourceFolder")}</small><code>{installed.sourcePath}</code></div>}
               <div className="badges plugin-permissions">{installed.approvedPermissions.length ? installed.approvedPermissions.map((permission) => <StatusPill key={permission} tone={sensitivePermissionSet.has(permission) ? "red" : permission === "network" || permission === "network:write" ? "orange" : "blue"}>{t(pluginPermissionLabelKeys[permission])}</StatusPill>) : <StatusPill tone="slate">{t("plugins.inspector.noPermissions")}</StatusPill>}</div>
+              {installed.approvedPermissions.includes("companion:context") && <p className="plugin-permission-note">{t("plugins.permission.companionContextNote")}</p>}
             </section>
             {!!installed.configErrors?.length && <section className="plugin-section plugin-section-danger"><div className="plugin-section-title"><small>{t("plugins.inspector.configuration")}</small><strong>{t("plugins.inspector.needsAttention")}</strong></div><ul>{installed.configErrors.map((configError, index) => <li key={index}>{configError.message || String(configError)}</li>)}</ul></section>}
             {hasConfigFields && <section className="plugin-section">
@@ -3822,46 +3897,33 @@ function PluginsView() {
   );
 }
 
-function PetCompanionPanel({ petId }: { petId: string }) {
+function PetCompanionPanel({ petId, originalName, onDirtyChange }: { petId: string; originalName: string; onDirtyChange: (dirty: boolean) => void }) {
   const { t } = useI18n();
   const [settings, setSettings] = useState<CompanionSettings | null>(null);
-  const [health, setHealth] = useState<CompanionTargetHealth | null>(null);
-  const [codexConnected, setCodexConnected] = useState(false);
-  const [personality, setPersonality] = useState("");
-  const [profileName, setProfileName] = useState("");
-  const [preferredAddress, setPreferredAddress] = useState("");
-  const [goals, setGoals] = useState("");
+  const emptyCharacter = React.useMemo<CompanionCharacterProfile>(() => ({ visibleName: originalName, species: "", origin: "", appearance: "", personality: "", quirks: "", lifeStory: "" }), [originalName]);
+  const [draft, setDraft] = useState<CompanionCharacterProfile>(emptyCharacter);
+  const [sourceText, setSourceText] = useState("");
   const [status, setStatus] = useState("");
   const [panelError, setPanelError] = useState("");
   const [busyAction, setBusyAction] = useState("");
 
   const applySettings = React.useCallback((next: CompanionSettings) => {
     setSettings(next);
-    setPersonality(next.pets[petId]?.personality ?? "");
-    setProfileName(next.profile.name);
-    setPreferredAddress(next.profile.preferredAddress);
-    setGoals(next.profile.goals.join("\n"));
-  }, [petId]);
+    setDraft(next.characters[petId] ?? emptyCharacter);
+  }, [petId, emptyCharacter]);
 
   useEffect(() => {
     let active = true;
-    void Promise.all([api.getCompanionSettings(), api.getIntegrationsState()]).then(([next, integrations]) => {
+    void api.getCompanionSettings().then((next) => {
       if (!active) return;
       applySettings(next);
-      setCodexConnected(integrations.codexStatus.state === "connected");
     }).catch((error) => { if (active) setPanelError(String((error as Error)?.message ?? error)); });
     return () => { active = false; };
   }, [applySettings]);
 
-  useEffect(() => {
-    if (!settings?.enabled) { setHealth(null); return; }
-    let active = true;
-    setHealth(null);
-    void api.getCompanionTargetHealth(settings.target).then((next) => { if (active) setHealth(next); }).catch((error) => {
-      if (active) setPanelError(String((error as Error)?.message ?? error));
-    });
-    return () => { active = false; };
-  }, [settings?.enabled, settings?.target]);
+  const saved = settings?.characters[petId] ?? emptyCharacter;
+  const dirty = JSON.stringify(draft) !== JSON.stringify(saved);
+  useEffect(() => { onDirtyChange(dirty); return () => onDirtyChange(false); }, [dirty, onDirtyChange]);
 
   async function run(action: string, task: () => Promise<void>) {
     try {
@@ -3876,72 +3938,63 @@ function PetCompanionPanel({ petId }: { petId: string }) {
     }
   }
 
-  async function patchSettings(patch: Record<string, unknown>, success: string) {
-    const next = await api.updateCompanionSettings(patch);
-    if ("profile" in patch) applySettings(next);
-    else setSettings(next);
-    setStatus(success);
-  }
+  const updateField = (key: keyof CompanionCharacterProfile, value: string) => setDraft((current) => ({ ...current, [key]: value }));
+  const generate = (mode: "complete" | "reimagine") => void run(mode, async () => {
+    const result = await api.generateCompanionCharacter({ petId, mode, draft, ...(sourceText.trim() ? { sourceText } : {}) });
+    setDraft(result.draft);
+    setStatus(t(mode === "complete" ? "pets.character.completedDraft" : "pets.character.reimaginedDraft"));
+  });
 
   return (
     <section className="companion-panel" aria-labelledby={`companion-title-${petId}`}>
       <div className="companion-panel-head">
         <div>
-          <p className="eyebrow">{t("pets.companion.eyebrow")}</p>
-          <h3 id={`companion-title-${petId}`}>{t("pets.companion.title")}</h3>
-          <p>{t("pets.companion.description")}</p>
+          <p className="eyebrow">{t("pets.character.eyebrow")}</p>
+          <h3 id={`companion-title-${petId}`}>{t("pets.character.title")}</h3>
+          <p>{t("pets.character.description")}</p>
         </div>
-        {settings?.enabled && <StatusPill tone={health?.ready ? "green" : health?.configured ? "orange" : "slate"}>{health?.ready ? t("pets.companion.ready") : health?.configured ? t("pets.companion.unverified") : t("pets.companion.unavailable")}</StatusPill>}
+        {dirty ? <StatusPill tone="orange">{t("pets.character.unsaved")}</StatusPill> : <StatusPill tone="green">{t("common.saved")}</StatusPill>}
       </div>
 
       {panelError && <div className="error companion-panel-message">{panelError}</div>}
       {status && <div className="companion-success companion-panel-message">{status}</div>}
 
-      {!settings ? <p className="desc">{t("common.loading")}</p> : !settings.enabled ? (
-        <div className="companion-disclosure">
-          <strong>{t("pets.companion.enableTitle")}</strong>
-          <p>{t("pets.companion.enableDisclosure")}</p>
-          <Button variant="primary" disabled={!!busyAction} onClick={() => void run("enable", async () => { applySettings(await api.enableCompanion()); setStatus(t("pets.companion.enabled")); })}>{t("pets.companion.enable")}</Button>
-        </div>
-      ) : (
+      {!settings ? <p className="desc">{t("common.loading")}</p> : (
         <div className="companion-panel-body">
-          <div className="companion-field">
-            <label htmlFor={`companion-personality-${petId}`}>{t("pets.companion.personality")}</label>
-            <small>{t("pets.companion.personalityDescription")}</small>
-            <textarea id={`companion-personality-${petId}`} value={personality} maxLength={800} rows={3} onChange={(event) => setPersonality(event.target.value)} placeholder={t("pets.companion.personalityPlaceholder")} />
-            <div className="companion-field-actions"><span>{personality.length}/800</span><Button variant="secondary" size="compact" disabled={!!busyAction} onClick={() => void run("personality", async () => { applySettings(await api.updateCompanionPetSettings(petId, { personality })); setStatus(t("pets.companion.personalitySaved")); })}>{t("common.save")}</Button></div>
+          <div className="character-action-bar">
+            <div><strong>{t("pets.character.aiTitle")}</strong><small>{t("pets.character.aiDescription")}</small></div>
+            <div className="flex flex-wrap gap-2"><Button variant="secondary" size="compact" disabled={!!busyAction || !settings.enabled} onClick={() => generate("complete")}>{t("pets.character.complete")}</Button><Button variant="primary" size="compact" disabled={!!busyAction || !settings.enabled} onClick={() => generate("reimagine")}>{t("pets.character.reimagine")}</Button></div>
           </div>
+          {!settings.enabled && <p className="companion-health-note">{t("pets.character.enableHint")}</p>}
 
           <div className="companion-profile-grid">
-            <label className="companion-field"><span>{t("pets.companion.yourName")}</span><input value={profileName} maxLength={120} onChange={(event) => setProfileName(event.target.value)} /></label>
-            <label className="companion-field"><span>{t("pets.companion.addressYouAs")}</span><input value={preferredAddress} maxLength={120} onChange={(event) => setPreferredAddress(event.target.value)} /></label>
+            <CharacterField label={t("pets.character.visibleName")} description={t("pets.character.visibleNameDescription")} value={draft.visibleName} maxLength={120} disabled={!!busyAction} onChange={(value) => updateField("visibleName", value)} />
+            <CharacterField label={t("pets.character.species")} description={t("pets.character.speciesDescription")} value={draft.species} maxLength={160} disabled={!!busyAction} onChange={(value) => updateField("species", value)} />
           </div>
-          <label className="companion-field"><span>{t("pets.companion.goals")}</span><small>{t("pets.companion.goalsDescription")}</small><textarea value={goals} rows={3} onChange={(event) => setGoals(event.target.value)} placeholder={t("pets.companion.goalsPlaceholder")} /></label>
-          <div className="companion-field-actions"><span /><Button variant="secondary" size="compact" disabled={!!busyAction} onClick={() => void run("profile", async () => { await patchSettings({ profile: { name: profileName, preferredAddress, goals: goals.split(/\r?\n/).map((goal) => goal.trim()).filter(Boolean) } }, t("pets.companion.profileSaved")); })}>{t("pets.companion.saveProfile")}</Button></div>
+          <CharacterField label={t("pets.character.origin")} description={t("pets.character.originDescription")} value={draft.origin} maxLength={500} rows={3} disabled={!!busyAction} onChange={(value) => updateField("origin", value)} />
+          <CharacterField label={t("pets.character.appearance")} description={t("pets.character.appearanceDescription")} value={draft.appearance} maxLength={700} rows={3} disabled={!!busyAction} onChange={(value) => updateField("appearance", value)} />
+          <CharacterField label={t("pets.character.personality")} description={t("pets.character.personalityDescription")} value={draft.personality} maxLength={900} rows={4} disabled={!!busyAction} onChange={(value) => updateField("personality", value)} />
+          <CharacterField label={t("pets.character.quirks")} description={t("pets.character.quirksDescription")} value={draft.quirks} maxLength={700} rows={3} disabled={!!busyAction} onChange={(value) => updateField("quirks", value)} />
+          <CharacterField label={t("pets.character.lifeStory")} description={t("pets.character.lifeStoryDescription")} value={draft.lifeStory} maxLength={1200} rows={5} disabled={!!busyAction} onChange={(value) => updateField("lifeStory", value)} />
 
-          <div className="companion-options-grid">
-            <label className="companion-field"><span>{t("pets.companion.provider")}</span><select value={settings.target} onChange={(event) => void run("provider", async () => { await patchSettings({ target: event.target.value }, t("pets.companion.providerSaved")); })}><option value="codex" disabled={!codexConnected}>{codexConnected ? t("pets.companion.provider.codex") : t("pets.companion.provider.codexConnect")}</option><option value="host-ai">{t("pets.companion.provider.hostAi")}</option></select>{!codexConnected && <small>{t("pets.companion.provider.codexDisabled")}</small>}</label>
-            <label className="companion-field"><span>{t("pets.companion.frequency")}</span><select value={settings.proactivity.frequency} onChange={(event) => void run("frequency", async () => { await patchSettings({ proactivity: { frequency: event.target.value } }, t("pets.companion.frequencySaved")); })}><option value="rarely">{t("pets.companion.frequency.rarely")}</option><option value="sometimes">{t("pets.companion.frequency.sometimes")}</option><option value="often">{t("pets.companion.frequency.often")}</option></select></label>
-          </div>
-          {health && !health.ready && health.reason && <p className="companion-health-note">{health.reason}</p>}
-
-          <div className="companion-toggles">
-            <label><input type="checkbox" checked={settings.memory.enabled} onChange={(event) => void run("memory", async () => { await patchSettings({ memory: { enabled: event.target.checked } }, t("pets.companion.preferencesSaved")); })} /> <span><strong>{t("pets.companion.recentMemory")}</strong><small>{t("pets.companion.recentMemoryDescription")}</small></span></label>
-            <label><input type="checkbox" checked={settings.proactivity.enabled} onChange={(event) => void run("proactivity", async () => { await patchSettings({ proactivity: { enabled: event.target.checked } }, t("pets.companion.preferencesSaved")); })} /> <span><strong>{t("pets.companion.checkIns")}</strong><small>{t("pets.companion.checkInsDescription")}</small></span></label>
-            <label><input type="checkbox" checked={settings.context.pluginEnabled} onChange={(event) => void run("plugin-context", async () => { await patchSettings({ context: { pluginEnabled: event.target.checked } }, t("pets.companion.preferencesSaved")); })} /> <span><strong>{t("pets.companion.pluginContext")}</strong><small>{t("pets.companion.pluginContextDescription")}</small></span></label>
-            <label><input type="checkbox" disabled={!settings.context.pluginEnabled} checked={settings.context.sensitivePluginEnabled} onChange={(event) => void run("sensitive-plugin-context", async () => { await patchSettings({ context: { sensitivePluginEnabled: event.target.checked } }, t("pets.companion.preferencesSaved")); })} /> <span><strong>{t("pets.companion.sensitivePluginContext")}</strong><small>{t("pets.companion.sensitivePluginContextDescription")}</small></span></label>
+          <div className="companion-field">
+            <span>{t("pets.character.sourceNotes")}</span><small>{t("pets.character.sourceNotesDescription")}</small>
+            <textarea value={sourceText} maxLength={8000} rows={3} disabled={!!busyAction} onChange={(event) => setSourceText(event.target.value)} placeholder={t("pets.character.sourceNotesPlaceholder")} />
+            <div className="companion-field-actions"><span>{sourceText.length}/8000 · {t("pets.character.notSaved")}</span><Button variant="secondary" size="compact" disabled={!!busyAction} onClick={() => void run("import", async () => { const result = await api.importCompanionText(); if (result.canceled) return; if (result.text.length > 8000) throw new Error(t("pets.character.sourceNotesTooLong")); setSourceText(result.text); })}>{t("settings.memory.import")}</Button></div>
           </div>
 
-          <p className="companion-health-note">{t("pets.companion.voiceFirst")}</p>
-
-          <div className="companion-danger-row">
-            <Button variant="secondary" size="compact" disabled={!!busyAction} onClick={() => void run("clear-memory", async () => { await api.clearCompanionMemory(petId); setStatus(t("pets.companion.memoryCleared")); })}>{t("pets.companion.clearMemory")}</Button>
-            <Button variant="danger" size="compact" disabled={!!busyAction} onClick={() => void run("disable", async () => { applySettings(await api.disableCompanion()); setStatus(t("pets.companion.disabled")); })}>{t("pets.companion.disable")}</Button>
+          <div className="character-save-bar">
+            <div>{dirty ? <strong>{t("pets.character.unsavedDescription")}</strong> : <span>{t("pets.character.savedDescription")}</span>}</div>
+            <div className="flex gap-2"><Button variant="secondary" size="compact" disabled={!!busyAction} onClick={() => { setDraft(emptyCharacter); setStatus(t("pets.character.resetDraft")); }}>{t("pets.character.reset")}</Button><Button variant="primary" size="compact" disabled={!!busyAction || !dirty} onClick={() => void run("save", async () => { applySettings(await api.updateCompanionCharacterSettings(petId, draft)); setStatus(t("pets.character.saved")); })}>{t("common.save")}</Button></div>
           </div>
         </div>
       )}
     </section>
   );
+}
+
+function CharacterField({ label, description, value, maxLength, rows, disabled, onChange }: { label: string; description: string; value: string; maxLength: number; rows?: number; disabled?: boolean; onChange: (value: string) => void }) {
+  return <label className="companion-field"><span>{label}</span><small>{description}</small>{rows ? <textarea value={value} maxLength={maxLength} rows={rows} disabled={disabled} onChange={(event) => onChange(event.target.value)} /> : <input value={value} maxLength={maxLength} disabled={disabled} onChange={(event) => onChange(event.target.value)} />}<span className="character-count">{value.length}/{maxLength}</span></label>;
 }
 
 function ControlCenter() {
@@ -3960,8 +4013,16 @@ function ControlCenter() {
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState("");
   const [error, setError] = useState(initialRoute.notice === "pet-unavailable" ? t("pets.companion.petUnavailable") : "");
+  const [characterDirty, setCharacterDirty] = useState(false);
+  const characterDirtyRef = useRef(false);
   const petDetailDialogRef = useRef<HTMLDivElement | null>(null);
   const previouslyFocusedElementRef = useRef<HTMLElement | null>(null);
+  const closePetDetails = React.useCallback(() => {
+    if (characterDirtyRef.current && !window.confirm(t("pets.character.discardConfirm"))) return;
+    setSelectedId("");
+    setCharacterDirty(false);
+  }, [t]);
+  useEffect(() => { characterDirtyRef.current = characterDirty; }, [characterDirty]);
 
   useEffect(() => api.onRouteChange((value) => {
     const request = normalizeControlCenterRouteRequest(value);
@@ -4076,7 +4137,7 @@ function ControlCenter() {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        setSelectedId("");
+        closePetDetails();
         return;
       }
 
@@ -4102,7 +4163,7 @@ function ControlCenter() {
       window.removeEventListener("keydown", handleKeyDown);
       previouslyFocusedElementRef.current?.focus();
     };
-  }, [selected]);
+  }, [selected, closePetDetails]);
 
   useEffect(() => {
     if (!selected) return;
@@ -4373,7 +4434,7 @@ function ControlCenter() {
 
           {selected ? (
             <div ref={petDetailDialogRef} className="plugin-config-overlay" role="dialog" aria-modal="true" aria-label={t("pets.detail.ariaLabel", { name: selected.displayName })}>
-              <button className="plugin-config-backdrop" type="button" aria-label={t("pets.detail.closeAria")} onClick={() => setSelectedId("")} />
+              <button className="plugin-config-backdrop" type="button" aria-label={t("pets.detail.closeAria")} onClick={closePetDetails} />
               <GlassCard className="plugin-inspector pet-detail-inspector">
                 <div className="plugin-inspector-head">
                   <span className="plugin-inspector-icon">
@@ -4387,7 +4448,7 @@ function ControlCenter() {
                     <p className="eyebrow">{t("pets.detail.eyebrow")}</p>
                     <h2>{selected.displayName}</h2>
                   </div>
-                  <Button variant="secondary" size="compact" icon={<CloseIcon />} onClick={() => setSelectedId("")}>{t("common.close")}</Button>
+                  <Button variant="secondary" size="compact" icon={<CloseIcon />} onClick={closePetDetails}>{t("common.close")}</Button>
                 </div>
 
                 <div className="pet-detail-content">
@@ -4429,7 +4490,7 @@ function ControlCenter() {
                 </div>
 
                 {selected.installed && !selected.broken && selected.id === defaultId && (
-                  <PetCompanionPanel petId={selected.id} />
+                  <PetCompanionPanel petId={selected.id} originalName={selected.displayName} onDirtyChange={setCharacterDirty} />
                 )}
 
                 <div className="actions-container mt-6 flex flex-col gap-3 pet-detail-actions">

@@ -12,7 +12,7 @@ export type CompanionProactivityPolicy = {
 export type CompanionProactiveCandidate = {
   readonly id: string;
   readonly dedupeKey: string;
-  readonly source: "time" | "goal" | "plugin" | "vision";
+  readonly source: "time" | "plugin" | "vision";
   readonly earliestAt?: number;
   readonly expiresAt: number;
   readonly pluginId?: string;
@@ -23,7 +23,8 @@ export type CompanionProactiveCandidate = {
 export type CompanionProactiveDelivery = {
   readonly candidateId: string;
   readonly dedupeKey: string;
-  readonly source: CompanionProactiveCandidate["source"];
+  /** `goal` is retained only so older 24-hour memory can still count toward limits. */
+  readonly source: CompanionProactiveCandidate["source"] | "goal";
   readonly pluginId?: string;
   readonly displayedAt: number;
 };

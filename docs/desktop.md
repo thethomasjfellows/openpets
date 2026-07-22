@@ -124,9 +124,11 @@ capability of its own. The renderer is the only "frontend" in scope for these
 docs (the `web/` marketing site is out of scope). See
 `src/renderer/src/codemap.md` for component structure.
 
-The default-pet detail owns `PetCompanionPanel`: disclosure and enablement, the
-pet personality, the small shared user profile, provider/frequency selection,
-plugin-context toggles, recent-memory clearing, and Companion disablement.
+The default-pet detail owns `PetCompanionPanel`, which edits only that pet's
+seven-field character profile. Settings owns the shared **Memory** page for the
+user profile, rolling-memory controls, clearing, and the single Off/Rarely/
+Sometimes/Often proactive selector. AI Brain owns provider selection; plugin
+context consent stays on each plugin's enable/permission surface.
 Typed chat and push-to-talk are not exposed. Other installed pets do not receive
 Companion controls. The Control Center never calls a provider directly and
 never receives credentials, raw microphone audio, or the persisted
@@ -473,9 +475,8 @@ reset when the selected target changes;
 an invalid resumed Codex session is retried once without the stale session.
 
 Companion starts disabled with consent version `0`. The first enable writes one
-atomic disclosed state: Companion enabled, recent memory enabled, gentle
-check-ins enabled at **Sometimes**, while plugin context, sensitive plugin
-context remains off. Later disable/re-enable cycles preserve the user's
+atomic disclosed state: Companion enabled, recent memory enabled, and gentle
+check-ins enabled at **Sometimes**. Later disable/re-enable cycles preserve the user's
 independently reversible choices. Wake and Vision remain separate explicit
 choices. A missing wake runtime, permission, or transcription model blocks live
 capture with a diagnostic reason but preserves the user's explicit wake
@@ -487,8 +488,11 @@ cannot silently grant microphone or screen consent.
 Host-owned persistence is deliberately separate from installed-pet app state:
 
 - `openpets-companion-settings.json` — consent, selected target, explicit user
-  profile (name, preferred address, up to five goals), per-installed-pet
-  personality, memory/proactivity/context/wake choices.
+  profile (name, preferred address, and freeform About You), per-installed-pet
+  character overlays (visible name, species, origin, appearance, personality,
+  quirks, and life story), plus memory/proactivity/wake choices. Version 2
+  migrates old goals into About You and old personality text into the matching
+  character overlay.
 - `openpets-companion-memory.json` — rolling displayed conversation. Startup
   rewrites it after pruning malformed/expired/over-limit entries. Retention is
   24 hours, with global, per-pet, prompt-entry, text, and file-size bounds.
@@ -523,7 +527,7 @@ Host-owned persistence is deliberately separate from installed-pet app state:
 `CompanionProactiveService` evaluates once after startup and then every five
 minutes for the visible, unpaused default pet. It derives local day parts and
 activity hints, can express morning/midday/evening/night posture without a
-bubble, and considers host time prompts, explicit goals, eligible plugin
+bubble, and considers host time prompts, eligible plugin
 opportunities, and recent eligible Vision summaries. Quiet hours, an active
 interaction, provider health, daily caps, per-plugin caps, dedupe, and minimum
 spacing all suppress delivery. Rarely,
@@ -534,7 +538,7 @@ The main process logs bounded decisions under the `companion` and `vision`
 scopes: settings changes, target/kind/input sizes, selected memory/fact counts,
 capture stage, retained entry counts, cancellations, proactive suppression
 reasons, and display/failure outcomes. It does not log prompts, responses,
-personality, goals, fact or Vision summary text, screenshots, paths,
+character/profile fields, fact or Vision summary text, screenshots, paths,
 credentials, endpoints, or raw audio.
 
 ### Local IPC server

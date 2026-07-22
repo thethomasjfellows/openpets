@@ -36,19 +36,18 @@ commands), not by bolting bespoke windows onto the pet. Concretely:
 
 ### Companion contribution strategy
 
-OpenPets core owns the conversational pet: per-pet personality, the user's
+OpenPets core owns the conversational pet: per-pet character profile, the user's
 minimal explicit profile, roughly 24 hours of recent memory, provider choice,
 speech, and the final decision to initiate a check-in. SuperPlugins remain
-modular domain experts. With `companion:context` and separate host consent they
+modular domain experts. With approved `companion:context` permission and while enabled they
 may offer expiring facts or opportunities, but they never write the pet's final
 line, force a check-in, select a provider, or add durable/core memory.
 
 This keeps habits, reminders, focus, calendars, and future screen awareness out
-of the core app while still letting the pet feel informed. Normal and sensitive
-plugin context have separate consent gates. Screen awareness remains a future
-explicit plugin boundary; the current reserved switch collects nothing. A
-future Screenpipe plugin may contribute bounded, expiring observations through
-`companion:context` after sensitive-context consent, but does not inherit the
+of the core app while still letting the pet feel informed. The plugin's own
+enable state and approved sensitive permission are the single context consent
+surface. A future Screenpipe plugin may contribute bounded, expiring observations through
+`companion:context` after that approval, but does not inherit the
 user's Codex MCP servers or become a callable Codex tool merely because Codex is
 the selected Brain.
 
