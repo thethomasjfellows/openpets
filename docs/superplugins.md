@@ -28,6 +28,11 @@ commands), not by bolting bespoke windows onto the pet. Concretely:
 - **Appliance, not platform knob.** Prefer many small, enable-and-go plugins over
   one big configurable one. (This is a standing product preference — a single
   plugin should explain itself by name and do one thing well.)
+- **Bounded utility, not general agent access.** Everyday requests such as
+  checking a calendar, setting a reminder, or starting a focus session belong
+  to a domain plugin with explicit permissions and validated actions. Companion
+  does not inherit Codex skills, MCP servers, shell access, or arbitrary tools.
+  See the canonical [Companion capability boundary](architecture.md#companion-capability-boundary).
 
 ### Companion contribution strategy
 
@@ -46,6 +51,15 @@ future Screenpipe plugin may contribute bounded, expiring observations through
 `companion:context` after sensitive-context consent, but does not inherit the
 user's Codex MCP servers or become a callable Codex tool merely because Codex is
 the selected Brain.
+
+The intended spoken-utility direction follows the same rule: the host may route
+a clear user request to a declared plugin action, the plugin performs only its
+approved domain operation, and the host lets the pet present the bounded result
+in its own personality. The conversation model is not given a general toolbox.
+The current SDK has plugin commands and Companion context contributions; a
+future spoken-intent/action contract remains design work and must keep
+permission approval, confirmation for consequential writes, input validation,
+and host-owned final wording explicit.
 
 Focus Buddy is the pilot for this contract. An active, unpaused focus session
 offers one low-urgency mid-session opportunity after a delay, with session-

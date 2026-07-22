@@ -121,6 +121,44 @@ These are the flows worth holding in memory. Each links to the doc that details 
   and ZIPs, validated, and uploaded to R2 behind `openpets.dev`. See
   [catalog.md](catalog.md) and [testing-and-validation.md](testing-and-validation.md).
 
+## Companion capability boundary
+
+The conversational pet is a **companion with awareness and bounded everyday
+utilities**, not a general-purpose agent or a voice frontend for Codex. Selecting
+Codex as the AI Brain uses Codex to generate the pet's response; it does not
+grant that pet-owned session the user's Codex skills, MCP servers, plugins,
+shell, repository, rules, or arbitrary API access. This isolation is a product
+boundary, not a temporary missing feature.
+
+The boundary keeps the pet's responsibilities coherent:
+
+- **Conversation:** personality, explicit profile, recent pet-scoped memory,
+  and natural spoken interaction.
+- **Awareness:** local time/activity plus separately consented Vision and plugin
+  context, always supplied as bounded untrusted observations.
+- **Utilities:** small, domain-specific capabilities supplied by installed
+  OpenPets plugins with declared permissions, validated inputs, and narrow
+  results that the pet can explain in its own voice.
+- **Proactivity:** restrained host-approved check-ins based on consented context
+  and expiring plugin opportunities.
+
+Serious coding, research, shell, repository, and open-ended agent work remains
+in the user's normal Codex or other agent session. Agent integrations continue
+to flow **from the agent into OpenPets** for pet controls and lifecycle
+reactions; they do not make Companion conversations a route back into the
+agent's tools. This separation prevents pet personality and concise-conversation
+instructions from conflicting with operational agent instructions, and avoids
+turning wake phrases, proactive check-ins, Vision, or false activations into
+unbounded tool execution.
+
+Calendar lookup, reminders, hydration, focus, and similar everyday actions
+belong in narrowly scoped plugins rather than general MCP/tool access. The
+plugin owns authentication, permissions, validation, and side effects; OpenPets
+owns intent routing, consent, presentation, and final companion-style wording.
+The current SDK supports plugin commands and context contributions. A future
+spoken-intent/action contract must preserve this bounded model rather than
+exposing arbitrary plugin, MCP, or provider tools to the conversation model.
+
 ## Cross-cutting invariants
 
 These hold everywhere; the rest of the docs assume them.
@@ -142,6 +180,10 @@ These hold everywhere; the rest of the docs assume them.
   addresses. Pet-owned Codex turns ignore user configuration/rules, disable
   plugins and shell tooling, use a read-only sandbox, and start in an empty
   user-private temporary workspace rather than the home directory or a project.
+- **Companion is not an agent gateway.** Pet-owned conversations never inherit
+  the user's Codex skills, MCP servers, plugins, shell, project rules, or
+  repository context. Bounded everyday actions belong to permission-checked
+  OpenPets plugins; serious agent work stays in the agent application.
 - **Companion data is consented and layered.** Core settings, pet personality,
   explicit profile fields, and roughly 24 hours of recent conversation are
   OpenPets-owned. Plugin context, sensitive plugin context, Vision, and wake
