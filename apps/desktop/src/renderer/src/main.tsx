@@ -3900,6 +3900,7 @@ function PluginsView() {
 function PetCompanionPanel({ petId, originalName, onDirtyChange }: { petId: string; originalName: string; onDirtyChange: (dirty: boolean) => void }) {
   const { t } = useI18n();
   const [settings, setSettings] = useState<CompanionSettings | null>(null);
+  const [brainHealth, setBrainHealth] = useState<CompanionTargetHealth | null>(null);
   const emptyCharacter = React.useMemo<CompanionCharacterProfile>(() => ({ visibleName: originalName, species: "", origin: "", appearance: "", personality: "", quirks: "", lifeStory: "" }), [originalName]);
   const [draft, setDraft] = useState<CompanionCharacterProfile>(emptyCharacter);
   const [sourceText, setSourceText] = useState("");
@@ -3914,9 +3915,11 @@ function PetCompanionPanel({ petId, originalName, onDirtyChange }: { petId: stri
 
   useEffect(() => {
     let active = true;
-    void api.getCompanionSettings().then((next) => {
+    void api.getCompanionSettings().then(async (next) => {
       if (!active) return;
       applySettings(next);
+      const nextHealth = await api.getCompanionTargetHealth(next.target).catch(() => null);
+      if (active) setBrainHealth(nextHealth);
     }).catch((error) => { if (active) setPanelError(String((error as Error)?.message ?? error)); });
     return () => { active = false; };
   }, [applySettings]);
@@ -3944,6 +3947,9 @@ function PetCompanionPanel({ petId, originalName, onDirtyChange }: { petId: stri
     setDraft(result.draft);
     setStatus(t(mode === "complete" ? "pets.character.completedDraft" : "pets.character.reimaginedDraft"));
   });
+  const generating = busyAction === "complete" || busyAction === "reimagine";
+  const brainReady = brainHealth?.ready === true;
+  const generatorReady = settings?.enabled === true && brainReady;
 
   return (
     <section className="companion-panel" aria-labelledby={`companion-title-${petId}`}>
@@ -3961,11 +3967,27 @@ function PetCompanionPanel({ petId, originalName, onDirtyChange }: { petId: stri
 
       {!settings ? <p className="desc">{t("common.loading")}</p> : (
         <div className="companion-panel-body">
-          <div className="character-action-bar">
-            <div><strong>{t("pets.character.aiTitle")}</strong><small>{t("pets.character.aiDescription")}</small></div>
-            <div className="flex flex-wrap gap-2"><Button variant="secondary" size="compact" disabled={!!busyAction || !settings.enabled} onClick={() => generate("complete")}>{t("pets.character.complete")}</Button><Button variant="primary" size="compact" disabled={!!busyAction || !settings.enabled} onClick={() => generate("reimagine")}>{t("pets.character.reimagine")}</Button></div>
+          <div className={`character-generator ${generating ? "is-generating" : ""}`}>
+            <div className="character-generator-head">
+              <div><strong>{t("pets.character.aiTitle")}</strong><small>{t("pets.character.aiDescription")}</small></div>
+              <div className="character-brain-status">
+                <StatusPill tone={brainReady ? "green" : brainHealth?.configured ? "orange" : "slate"}>{brainHealth === null ? t("pets.character.brainChecking") : brainReady ? t("pets.character.brainReady") : t("pets.character.brainNeedsSetup")}</StatusPill>
+                <small>{brainHealth === null ? t("pets.character.brainCheckingDescription") : brainReady ? t("pets.character.brainReadyDescription", { provider: brainHealth.provider ?? settings.target, model: brainHealth.model ?? t("pets.character.selectedModel") }) : brainHealth.reason ?? t("pets.character.brainSetupDescription")}</small>
+              </div>
+            </div>
+            <div className="character-generator-options">
+              <div className="character-generator-option">
+                <div><strong>{t("pets.character.completeTitle")}</strong><small>{t("pets.character.completeDescription")}</small></div>
+                <Button variant="secondary" disabled={!!busyAction || !generatorReady} onClick={() => generate("complete")}>{busyAction === "complete" ? t("pets.character.completing") : t("pets.character.complete")}</Button>
+              </div>
+              <div className="character-generator-option character-generator-option-featured">
+                <div><strong>{t("pets.character.reimagineTitle")}</strong><small>{t("pets.character.reimagineDescription")}</small></div>
+                <Button variant="primary" disabled={!!busyAction || !generatorReady} onClick={() => generate("reimagine")}>{busyAction === "reimagine" ? t("pets.character.reimagining") : t("pets.character.reimagine")}</Button>
+              </div>
+            </div>
+            {!generatorReady && <p className="character-generator-help">{t("pets.character.generatorRequirement")}</p>}
+            {generating && <div className="character-generation-progress" role="status" aria-live="polite"><span className="character-generation-spinner" aria-hidden="true" /><div><strong>{t(busyAction === "complete" ? "pets.character.completingStatus" : "pets.character.reimaginingStatus")}</strong><small>{t("pets.character.generationWait")}</small></div></div>}
           </div>
-          {!settings.enabled && <p className="companion-health-note">{t("pets.character.enableHint")}</p>}
 
           <div className="companion-profile-grid">
             <CharacterField label={t("pets.character.visibleName")} description={t("pets.character.visibleNameDescription")} value={draft.visibleName} maxLength={120} disabled={!!busyAction} onChange={(value) => updateField("visibleName", value)} />

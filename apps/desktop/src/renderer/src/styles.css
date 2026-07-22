@@ -199,7 +199,7 @@
   .companion-panel { @apply mt-2 flex flex-col gap-4 rounded-[24px] border border-blue-200/70 bg-blue-50/45 p-5; box-shadow: inset 0 1px 0 rgba(255,255,255,.9); }
   .companion-panel-head { @apply flex items-start justify-between gap-4; }
   .companion-panel-head h3 { @apply m-0 font-monoDisplay text-xl font-black text-navy; }
-  .companion-panel-head p:not(.eyebrow) { @apply mb-0 mt-1 max-w-2xl text-xs leading-relaxed text-slatecopy; }
+  .companion-panel-head p:not(.eyebrow) { @apply mb-0 mt-1 max-w-2xl text-sm leading-relaxed text-slatecopy; }
   .companion-panel-body { @apply flex flex-col gap-4; }
   .companion-panel-message { @apply mb-0; }
   .companion-success { @apply rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700; }
@@ -221,18 +221,35 @@
   .wake-input-level-bars span:nth-child(4) { height: 100%; }
   .wake-input-level-bars span.is-active { @apply bg-brand; }
   .companion-field { @apply flex min-w-0 flex-col gap-1.5 text-xs font-bold text-navy; }
-  .companion-field small { @apply font-normal leading-relaxed text-slatecopy; }
+  .companion-field small { @apply text-sm font-normal leading-relaxed text-slatecopy; }
   .companion-field input, .companion-field textarea, .companion-field select, .companion-composer textarea { @apply w-full rounded-xl border border-blue-200/80 bg-white/90 px-3 py-2 text-sm font-medium text-navy outline-none transition focus:border-brand focus:ring-4 focus:ring-brand/15; }
   .companion-field textarea, .companion-composer textarea { @apply resize-y leading-relaxed; }
   .companion-field-actions { @apply flex items-center justify-between gap-3 text-[11px] font-semibold text-slatecopy; }
   .settings-row-stack { @apply flex-col items-stretch; }
   .companion-unsaved { @apply w-full rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800; }
-  .character-action-bar, .character-save-bar { @apply flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-blue-100 bg-white/70 p-4; }
-  .character-action-bar > div:first-child { @apply flex min-w-[240px] flex-1 flex-col; }
-  .character-action-bar small { @apply mt-1 text-xs font-normal leading-relaxed text-slatecopy; }
-  .character-save-bar { @apply sticky bottom-0 z-10 border-blue-200 bg-white/95 shadow-lg backdrop-blur; }
+  .character-generator { @apply flex flex-col gap-4 rounded-2xl border border-blue-200 bg-white/75 p-4; }
+  .character-generator-head { @apply flex flex-wrap items-start justify-between gap-4 border-b border-blue-100 pb-4; }
+  .character-generator-head > div:first-child { @apply flex min-w-[240px] flex-1 flex-col; }
+  .character-generator-head small { @apply mt-1 text-sm font-normal leading-relaxed text-slatecopy; }
+  .character-brain-status { @apply flex max-w-sm flex-col items-start gap-1; }
+  .character-brain-status small { @apply m-0 text-xs; }
+  .character-generator-options { @apply grid grid-cols-1 gap-3 lg:grid-cols-2; }
+  .character-generator-option { @apply flex min-h-[148px] flex-col justify-between gap-4 rounded-2xl border border-blue-100 bg-white/80 p-4; }
+  .character-generator-option-featured { @apply border-blue-300 bg-blue-50/70 shadow-sm; }
+  .character-generator-option > div { @apply flex flex-col gap-1; }
+  .character-generator-option > div > strong { @apply text-base text-navy; }
+  .character-generator-option small { @apply text-sm font-normal leading-relaxed text-slatecopy; }
+  .character-generator-help { @apply m-0 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-relaxed text-amber-900; }
+  .character-generation-progress { @apply flex items-center gap-3 rounded-xl border border-blue-300 bg-blue-50 px-4 py-3 text-navy; }
+  .character-generation-progress > div { @apply flex flex-col; }
+  .character-generation-progress small { @apply mt-0.5 text-sm text-slatecopy; }
+  .character-generation-spinner { @apply h-6 w-6 shrink-0 rounded-full border-[3px] border-blue-200 border-t-brand; animation: character-spin 0.8s linear infinite; }
+  .character-save-bar { @apply flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-blue-300 bg-white/95 p-4 shadow-lg backdrop-blur sticky bottom-0 z-10; }
   .character-save-bar strong { @apply text-sm text-amber-800; }
-  .character-save-bar span { @apply text-sm text-slatecopy; }
+  .character-save-bar > div:first-child > span { @apply text-sm text-slatecopy; }
+  .character-save-bar .btn-primary { color: #fff; background: linear-gradient(180deg, #2684ff, #075bd8); border-color: #0752c5; box-shadow: inset 0 1px 0 rgba(255,255,255,0.42), 0 4px 10px rgba(23,109,242,0.25); }
+  .character-save-bar .btn-primary .btn-text { @apply text-white; }
+  @keyframes character-spin { to { transform: rotate(360deg); } }
   .character-count { @apply self-end text-[10px] font-semibold text-slatecopy; }
   .plugin-permission-note { @apply m-0 rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-xs leading-relaxed text-slatecopy; }
   .companion-profile-grid, .companion-options-grid { @apply grid grid-cols-1 gap-3 sm:grid-cols-2; }

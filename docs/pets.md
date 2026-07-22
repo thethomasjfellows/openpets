@@ -118,8 +118,8 @@ The immutable asset ID and artwork remain unchanged. The shared user profile is
 name, preferred form of address, and freeform About You background. Removing a
 pet also removes that pet's character overlay, recent memory, and live turn.
 
-Pet Details edits a local draft and requires an explicit Save. **Complete
-Character** asks the selected AI Brain to fill only blank fields;
+Pet Details edits a local draft and requires an explicit Save. **Fill Missing
+Details** asks the selected AI Brain to fill only blank fields;
 **Reimagine Character** replaces all seven fields, including the visible name.
 Both use only the original package name/description, the editable draft, and
 optional imported `.txt`/`.md` source notes—never pet image analysis. Imported
@@ -127,6 +127,9 @@ source notes are visible and transient, generated output is strictly validated
 as structured JSON, and closing Pet Details warns before discarding an unsaved
 draft. **Reset to original** restores an original-derived draft without touching
 the asset ID, sprites, or installed files.
+The generator shows whether the selected AI Brain is ready, explains both
+choices before they run, and displays a live progress state while creating the
+draft.
 
 The first **Enable Companion** action is the disclosure boundary. It atomically
 enables roughly 24-hour recent memory and gentle proactive check-ins at
