@@ -8,6 +8,8 @@ import { resolveInstalledPetVoiceTarget, resolvePluginPetVoiceTarget } from "./p
 import type { VoiceProviderRegistry } from "./voice-provider-registry.js";
 import { sanitizeProviderError } from "./voice-provider.js";
 import { getVoiceSettings, resolveVoiceAttemptPlan, resolveVoiceSelection, type VoiceOverlapPolicy, type VoiceProviderId, type VoiceSelection } from "./voice-settings.js";
+import { normalizeVoiceSpeechText } from "./voice-speech-text.js";
+import { buildVoiceCaption } from "./voice-caption-timing.js";
 
 export type VoiceTarget =
   | { readonly kind: "default" }
@@ -24,6 +26,8 @@ export type VoiceSpeakRequest = {
   readonly requestedModel?: string;
   readonly requestedRate?: number;
   readonly overlapPolicy?: VoiceOverlapPolicy;
+  /** Reveal this response in the pet bubble as playback advances. */
+  readonly progressiveCaption?: boolean;
 };
 
 export type VoiceSpeakAttempt = {
@@ -38,19 +42,34 @@ export type VoiceSpeakAttempt = {
 
 export type VoiceSpeakResult = { readonly ok: boolean; readonly attempts: VoiceSpeakAttempt[] };
 
+export type VoiceOutputActivitySnapshot = {
+  readonly active: boolean;
+  readonly activePetIds: readonly string[];
+  readonly activeReasons: readonly VoiceSpeakRequest["reason"][];
+};
+
 type ResolvedTarget = { readonly key: string; readonly petId: string; readonly window: BrowserWindow };
+type NormalizedVoiceSpeakRequest = VoiceSpeakRequest & { readonly captionText?: string };
 type QueuedJob = {
   readonly target: ResolvedTarget;
-  readonly request: VoiceSpeakRequest;
+  readonly request: NormalizedVoiceSpeakRequest;
   readonly selection: VoiceSelection;
   readonly resolve: (result: VoiceSpeakResult) => void;
 };
-type ActiveJob = { readonly generation: number; readonly controller: AbortController; readonly window: BrowserWindow };
+type ActiveJob = {
+  readonly generation: number;
+  readonly controller: AbortController;
+  readonly window: BrowserWindow;
+  readonly petId: string;
+  readonly reason: VoiceSpeakRequest["reason"];
+  playing: boolean;
+};
 type PetVoiceState = { generation: number; active?: ActiveJob; queue: QueuedJob[] };
 
 export class VoiceOutputService {
   readonly #providers: VoiceProviderRegistry;
   readonly #states = new Map<string, PetVoiceState>();
+  readonly #activityListeners = new Set<(snapshot: VoiceOutputActivitySnapshot) => void>();
 
   constructor(providers: VoiceProviderRegistry) {
     this.#providers = providers;
@@ -59,7 +78,11 @@ export class VoiceOutputService {
   async speak(request: VoiceSpeakRequest): Promise<VoiceSpeakResult> {
     const text = request.text.trim();
     if (!text || text.length > 4_000) return { ok: false, attempts: [{ providerId: "system", started: false, errorType: "configuration", message: "Speech text must contain 1–4000 characters." }] };
-    const normalizedRequest: VoiceSpeakRequest = { ...request, text };
+    const normalizedRequest: NormalizedVoiceSpeakRequest = {
+      ...request,
+      text: normalizeVoiceSpeechText(text),
+      ...(request.progressiveCaption ? { captionText: text } : {}),
+    };
     let target: ResolvedTarget;
     try {
       target = this.#resolveTarget(normalizedRequest.target);
@@ -79,6 +102,9 @@ export class VoiceOutputService {
     const policy = normalizedRequest.overlapPolicy ?? selection.overlapPolicy;
     const state = this.#state(target.key);
     if (state.active) {
+      if (state.active.reason === "settings-test" && normalizedRequest.reason !== "settings-test") {
+        return { ok: false, attempts: [{ providerId: selection.providerId, started: false, errorType: "capability", message: "A voice test is already playing for this pet." }] };
+      }
       if (policy === "ignore") return { ok: false, attempts: [{ providerId: selection.providerId, started: false, errorType: "capability", message: "Voice output is already active for this pet." }] };
       if (policy === "queue") {
         return new Promise((resolve) => {
@@ -86,7 +112,10 @@ export class VoiceOutputService {
           state.queue.push({ target, request: normalizedRequest, selection, resolve });
         });
       }
-      this.#cancelState(target.key, state);
+      // Keep the same state entry so generations remain monotonic. Replacing
+      // it can reuse an old generation number and let cancelled playback clear
+      // or incorrectly complete the new Settings test.
+      this.#cancelState(target.key, state, false);
     }
     return this.#run(target, normalizedRequest, selection, state);
   }
@@ -101,10 +130,24 @@ export class VoiceOutputService {
     this.#states.clear();
   }
 
-  async #run(target: ResolvedTarget, request: VoiceSpeakRequest, selection: VoiceSelection, state: PetVoiceState): Promise<VoiceSpeakResult> {
+  getActivitySnapshot(): VoiceOutputActivitySnapshot {
+    const activeJobs = Array.from(this.#states.values()).flatMap((state) => state.active?.playing ? [state.active] : []);
+    return {
+      active: activeJobs.length > 0,
+      activePetIds: Array.from(new Set(activeJobs.map((job) => job.petId))),
+      activeReasons: Array.from(new Set(activeJobs.map((job) => job.reason))),
+    };
+  }
+
+  onActivityChanged(listener: (snapshot: VoiceOutputActivitySnapshot) => void): () => void {
+    this.#activityListeners.add(listener);
+    return () => this.#activityListeners.delete(listener);
+  }
+
+  async #run(target: ResolvedTarget, request: NormalizedVoiceSpeakRequest, selection: VoiceSelection, state: PetVoiceState): Promise<VoiceSpeakResult> {
     const generation = ++state.generation;
     const controller = new AbortController();
-    state.active = { generation, controller, window: target.window };
+    state.active = { generation, controller, window: target.window, petId: target.petId, reason: request.reason, playing: false };
     const attempts: VoiceSpeakAttempt[] = [];
     const chosenVoice = request.requestedVoiceId ?? selection.voiceId;
     const attemptsToRun = resolveVoiceAttemptPlan(selection, chosenVoice, request.reason !== "settings-test");
@@ -124,8 +167,15 @@ export class VoiceOutputService {
           if (!this.#isCurrent(target.key, generation) || controller.signal.aborted) return { ok: false, attempts };
           attempts.push({ providerId, voiceId: useProviderDefault ? undefined : chosenVoice, model: selection.model, started: true, fallbackReason });
           debug("pet.window", "voice output started", { providerId, petId: target.petId, reason: request.reason, fallback: index > 0 });
-          if (result.kind === "system") await speakPetWindowVoiceTts(target.window, result.text, { voice: result.voiceId, rate: result.rate }, generation);
-          else await playPetWindowVoiceAudio(target.window, { bytes: result.bytes, mimeType: result.mimeType, volume: 1 }, generation);
+          const caption = request.progressiveCaption ? buildVoiceCaption(request.captionText ?? request.text) : undefined;
+          const playbackStarted = () => {
+            const active = state.active;
+            if (!this.#isCurrent(target.key, generation) || !active || active.playing) return;
+            active.playing = true;
+            this.#emitActivity();
+          };
+          if (result.kind === "system") await speakPetWindowVoiceTts(target.window, result.text, { voice: result.voiceId, rate: result.rate }, generation, caption, playbackStarted);
+          else await playPetWindowVoiceAudio(target.window, { bytes: result.bytes, mimeType: result.mimeType, volume: 1 }, generation, caption, playbackStarted);
           if (!this.#isCurrent(target.key, generation)) return { ok: false, attempts };
           return { ok: true, attempts };
         } catch (error) {
@@ -139,6 +189,7 @@ export class VoiceOutputService {
     } finally {
       if (this.#isCurrent(target.key, generation)) {
         state.active = undefined;
+        this.#emitActivity();
         const next = state.queue.shift();
         if (next) {
           void this.#run(next.target, next.request, next.selection, state).then(next.resolve);
@@ -149,13 +200,22 @@ export class VoiceOutputService {
     }
   }
 
-  #cancelState(key: string, state: PetVoiceState): void {
+  #cancelState(key: string, state: PetVoiceState, removeState = true): void {
+    const wasActive = Boolean(state.active);
     state.generation += 1;
     state.active?.controller.abort();
     if (state.active?.window && !state.active.window.isDestroyed()) stopPetWindowVoice(state.active.window);
     state.active = undefined;
     for (const queued of state.queue.splice(0)) queued.resolve({ ok: false, attempts: [] });
-    this.#states.delete(key);
+    if (removeState) this.#states.delete(key);
+    if (wasActive) this.#emitActivity();
+  }
+
+  #emitActivity(): void {
+    const snapshot = this.getActivitySnapshot();
+    for (const listener of this.#activityListeners) {
+      try { listener(snapshot); } catch { /* activity observers are isolated */ }
+    }
   }
 
   #isCurrent(key: string, generation: number): boolean {

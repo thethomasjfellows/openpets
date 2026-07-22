@@ -105,6 +105,10 @@
   .settings-section-title { @apply m-0 font-monoDisplay text-2xl font-black text-navy; }
 
   .settings-group { @apply flex flex-col overflow-hidden rounded-[24px] border border-blue-100/70 bg-white/55 shadow-sm; }
+  .ai-provider-card { @apply mb-5 transition-all; }
+  .ai-provider-card-active { @apply border-blue-400 bg-white shadow-md ring-2 ring-blue-200/70; }
+  .ai-provider-card-header { @apply bg-white/70; }
+  .ai-brain-selector-card { @apply mb-7 border-blue-300 bg-blue-50/70 shadow-md; }
   .settings-row { @apply flex items-center justify-between gap-4 p-5 transition-colors hover:bg-white/80 border-b border-blue-50 last:border-b-0; }
   .settings-row-info { @apply flex-1 min-w-0; }
   .settings-row-info strong { @apply block text-sm font-bold text-navy; }
@@ -202,6 +206,20 @@
   .companion-disclosure { @apply flex flex-col items-start gap-3 rounded-2xl border border-blue-100 bg-white/75 p-4 text-sm text-slatecopy; }
   .companion-disclosure strong { @apply text-navy; }
   .companion-disclosure p { @apply m-0 leading-relaxed; }
+  .wake-calibration-card { @apply flex flex-wrap items-center justify-between gap-4 border-b border-blue-100/70 px-4 py-4; }
+  .wake-calibration-card .settings-row-info { @apply min-w-[260px] flex-1; }
+  .wake-calibration-actions { @apply flex flex-wrap items-center justify-end gap-2; }
+  .wake-calibration-prompt { @apply mt-1 rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 font-semibold text-navy; }
+  .wake-calibration-interpretations { @apply mt-2 flex flex-wrap gap-2; }
+  .wake-calibration-interpretation { @apply inline-flex items-center gap-2 rounded-full border border-blue-200 bg-white px-3 py-1 text-xs font-semibold text-navy shadow-sm transition hover:border-red-200 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50; }
+  .wake-input-level { @apply flex min-w-[140px] items-center justify-end gap-3 text-xs font-semibold text-slatecopy; }
+  .wake-input-level-bars { @apply flex h-6 items-end gap-1; }
+  .wake-input-level-bars span { @apply block w-2 rounded-sm bg-blue-100 transition-colors; }
+  .wake-input-level-bars span:nth-child(1) { height: 25%; }
+  .wake-input-level-bars span:nth-child(2) { height: 45%; }
+  .wake-input-level-bars span:nth-child(3) { height: 70%; }
+  .wake-input-level-bars span:nth-child(4) { height: 100%; }
+  .wake-input-level-bars span.is-active { @apply bg-brand; }
   .companion-field { @apply flex min-w-0 flex-col gap-1.5 text-xs font-bold text-navy; }
   .companion-field small { @apply font-normal leading-relaxed text-slatecopy; }
   .companion-field input, .companion-field textarea, .companion-field select, .companion-composer textarea { @apply w-full rounded-xl border border-blue-200/80 bg-white/90 px-3 py-2 text-sm font-medium text-navy outline-none transition focus:border-brand focus:ring-4 focus:ring-brand/15; }
@@ -297,10 +315,11 @@
   .codex-approval-note { @apply border-t border-amber-200/80 pt-2 font-semibold; }
   .codex-capability-grid { @apply grid grid-cols-2 gap-3; }
   .codex-capability-card { @apply flex flex-col gap-2 rounded-2xl border border-blue-100/70 bg-white/70 p-4; }
+  .codex-capability-card-wide { @apply col-span-2; }
   .codex-capability-card > strong { @apply text-sm text-navy; }
   .codex-capability-card > p { @apply m-0 text-xs leading-relaxed text-slatecopy; }
   .codex-capability-card > small { @apply rounded-xl bg-blue-50/80 p-2.5 text-xs font-semibold leading-relaxed text-navy; }
-  @media (max-width: 640px) { .codex-detection-grid, .codex-action-bar, .codex-capability-grid { @apply grid-cols-1; } }
+  @media (max-width: 640px) { .codex-detection-grid, .codex-action-bar, .codex-capability-grid { @apply grid-cols-1; } .codex-capability-card-wide { @apply col-span-1; } }
 
   /* Dashboard */
   .dashboard-layout { @apply flex flex-col gap-6 overflow-y-auto pr-2 pb-8 h-full; overscroll-behavior: contain; }

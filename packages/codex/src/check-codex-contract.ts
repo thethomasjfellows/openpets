@@ -1,19 +1,75 @@
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 
 import { classifyCodexHookPayload } from "./hooks.js";
 import { inspectCodexHooks, installCodexHooks, uninstallCodexHooks } from "./hook-settings.js";
-import { disconnectCodexIntegration } from "./integration.js";
+import { disconnectCodexIntegration, doctorCodexIntegration } from "./integration.js";
 import { inspectCodexMcp, uninstallCodexMcp } from "./mcp-settings.js";
 import { removeLegacyTomlSections } from "./legacy-migration.js";
 import { sanitizeCommandSummary } from "./codex-cli.js";
+import { createCodexChildEnvironment } from "./codex-child-environment.js";
 import { buildManagedChanges, isSupportedCodexVersion, resolveCodexPaths } from "./ownership.js";
+import { discoverCodexModels, parseCodexModelListResponse } from "./model-discovery.js";
 import type { CodexIntegrationOptions } from "./types.js";
 
 assert.equal(isSupportedCodexVersion("codex-cli 0.144.4"), true);
-assert.equal(isSupportedCodexVersion("codex-cli 0.145.0"), false);
+assert.equal(isSupportedCodexVersion("codex-cli 0.145.0"), true);
+assert.equal(isSupportedCodexVersion("codex-cli 0.143.9"), false);
+assert.equal(isSupportedCodexVersion("codex-cli 1.0.0"), false);
+const modelCatalogResponse = {
+  id: 2,
+  result: {
+    data: [
+      {
+        id: "gpt-default",
+        model: "gpt-default",
+        displayName: "GPT Default",
+        description: "Default multimodal model",
+        isDefault: true,
+        hidden: false,
+        inputModalities: ["text", "image"],
+        defaultReasoningEffort: "high",
+        supportedReasoningEfforts: [
+          { reasoningEffort: "low", description: "Fast" },
+          { reasoningEffort: "high", description: "Thorough" },
+        ],
+      },
+      {
+        id: "gpt-text",
+        model: "gpt-text",
+        displayName: "GPT Text",
+        inputModalities: ["text"],
+        supportedReasoningEfforts: [{ reasoningEffort: "medium", description: "Balanced" }],
+      },
+    ],
+  },
+};
+const parsedModels = parseCodexModelListResponse(modelCatalogResponse, 123);
+assert.equal(parsedModels.status, "ready");
+assert.equal(parsedModels.defaultModelId, "gpt-default");
+assert.deepEqual(parsedModels.models[0]?.inputModalities, ["text", "image"]);
+assert.deepEqual(parsedModels.models[0]?.supportedReasoningEfforts.map((effort) => effort.value), ["low", "high"]);
+const discoveredModels = await discoverCodexModels({ now: () => 456, runAppServer: async (command) => {
+  assert.equal(command, "/usr/local/bin/codex-test");
+  return modelCatalogResponse;
+}, codexCommand: "/usr/local/bin/codex-test" });
+assert.equal(discoveredModels.status, "ready");
+assert.equal(discoveredModels.checkedAt, 456);
+const absoluteCodexCommand = process.platform === "win32" ? "C:\\Codex\\codex.exe" : "/opt/homebrew/bin/codex";
+const absoluteCodexDirectory = process.platform === "win32" ? "C:\\Codex" : "/opt/homebrew/bin";
+const duplicateCodexDirectory = `${absoluteCodexDirectory}${process.platform === "win32" ? "\\" : "/"}`;
+const packagedCodexEnvironment = createCodexChildEnvironment({
+  HOME: "/Users/example",
+  USERPROFILE: "C:\\Users\\example",
+  PATH: ["/usr/bin", duplicateCodexDirectory, "/bin"].join(delimiter),
+  OPENAI_API_KEY: "must-not-leak",
+}, absoluteCodexCommand);
+assert.equal(packagedCodexEnvironment.PATH?.split(delimiter)[0], absoluteCodexDirectory);
+assert.equal(packagedCodexEnvironment.PATH?.split(delimiter).filter((entry) => entry.startsWith(absoluteCodexDirectory)).length, 1);
+assert.equal(process.platform === "win32" ? packagedCodexEnvironment.USERPROFILE : packagedCodexEnvironment.HOME, process.platform === "win32" ? "C:\\Users\\example" : "/Users/example");
+assert.equal(packagedCodexEnvironment.OPENAI_API_KEY, undefined);
 assert.deepEqual(classifyCodexHookPayload({ hook_event_name: "UserPromptSubmit", prompt: "secret" }), {
   lifecycle: "thinking",
   reaction: "thinking",
@@ -116,6 +172,26 @@ assert.equal(installed.trust, "waiting");
 const installedSource = await readFile(resolveCodexPaths(codexHome).hooks, "utf8");
 assert.match(installedSource, /echo unrelated/);
 assert.match(installedSource, /--openpets-managed/);
+const userPromptGroup = installed.managedGroupIndexes.UserPromptSubmit;
+assert.equal(typeof userPromptGroup, "number");
+await writeFile(join(codexHome, "config.toml"), `[hooks.state."${resolveCodexPaths(codexHome).hooks}:user_prompt_submit:${userPromptGroup}:0"]\ntrusted_hash = "sha256:stale-approval"\n`);
+const approvalSnapshot = await doctorCodexIntegration({
+  ...options,
+  codexCommand: "/usr/bin/codex-test",
+  runCommand: async (_command, args) => {
+    if (args[0] === "--version") return { ok: true, status: 0, stdout: "codex-cli 0.144.4", stderr: "" };
+    if (args[0] === "mcp" && args[1] === "get") return {
+      ok: true,
+      status: 0,
+      stdout: JSON.stringify({ transport: { command: "/usr/bin/node", args: [options.mcpEntryPath] } }),
+      stderr: "",
+    };
+    throw new Error(`Unexpected Codex command: ${args.join(" ")}`);
+  },
+});
+assert.equal(approvalSnapshot.state, "waiting_for_trust", "stale approval needs review, not an endless repair loop");
+assert.equal(approvalSnapshot.canRepair, false);
+assert.equal(approvalSnapshot.checks.find((check) => check.id === "hook-trust")?.state, "waiting");
 assert.equal((await uninstallCodexHooks(options)).changed, true);
 const uninstalledSource = await readFile(resolveCodexPaths(codexHome).hooks, "utf8");
 assert.match(uninstalledSource, /echo unrelated/);

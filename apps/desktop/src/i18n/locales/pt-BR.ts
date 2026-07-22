@@ -194,7 +194,7 @@ export const ptBR: Partial<Messages> = {
   "settings.general.eyebrow": "Ambiente",
   "settings.general.title": "Configurações gerais",
   "settings.general.showOnLaunch.title": "Mostrar pet ao iniciar",
-  "settings.general.showOnLaunch.description": "Mantenha o OpenPets na bandeja, mas oculte o pet até que seja solicitado.",
+    "settings.general.showOnLaunch.description": "Mostre o pet padrão automaticamente sempre que o OpenPets iniciar.",
   "settings.general.launchAtLogin.title": "Iniciar ao fazer login",
   "settings.general.launchAtLogin.supported": "Inicie o OpenPets automaticamente quando o seu computador ligar.",
   "settings.general.launchAtLogin.unsupported": "Não compatível com esta plataforma.",

@@ -6,17 +6,20 @@ import { app, BrowserWindow, dialog, ipcMain, protocol, shell, type IpcMainInvok
 
 import { getAgentSetupSnapshot, launchCodexHookReview, runAgentSetupAction, updateAgentSetupCommandPaths } from "./agent-setup.js";
 import { refreshAgentPetContent } from "./agent-pet-controller.js";
-import { getAppStateSnapshot, getDesktopAnalyticsConsentState, normalizePetPoolOrder, petScaleOptions, setDesktopAnalyticsConsent, setPetPoolOrder, updatePreferences } from "./app-state.js";
+import { getAppStateSnapshot, getDesktopAnalyticsConsentState, normalizePetPoolOrder, petScaleOptions, setDesktopAnalyticsConsent, setPetPoolOrder, updateCodexReactionPreferences, updatePreferences, type OpenPetsStateV1 } from "./app-state.js";
 import { applyRoamingToAllPets } from "./pet-roaming-controller.js";
 import { classifyAnalyticsError, trackDesktopAnalyticsConsentChanged, trackDesktopEvent } from "./analytics.js";
 import { createAppIcon } from "./assets.js";
 import { clearCompanionMemory, removeCompanionMemoryForPet } from "./companion-memory.js";
 import { disableCompanion, enableCompanion, getCompanionSettings, removeCompanionPetSettings, updateCompanionPetSettings, updateCompanionSettings } from "./companion-settings.js";
 import { companionTargetIds, type CompanionTargetId } from "./companion-types.js";
+import { getCodexAiBrain } from "./codex-ai-brain.js";
 import { getCatalogPageUiState, getCatalogSearchUiState, getCatalogUiState } from "./catalog.js";
 import { getCodexPetsUiState, importCodexPet, readCodexPetSpritesheet } from "./codex-pets.js";
 import { setConfinementEnabled } from "./confinement-manager.js";
 import { setCrossDisplayRoamingEnabled } from "./display.js";
+import type { DesktopPermissionKind } from "./desktop-permissions.js";
+import { getDesktopPermissionService, restartOpenPetsForPermissions } from "./desktop-permissions-electron.js";
 import { getActiveLocale, getActiveMessages, LOCALE_LABELS, SUPPORTED_LOCALES, setLocaleFromPreference, t, type Locale, type LocalePreference } from "./i18n/index.js";
 import { recoverDefaultPetMouseInterop, refreshDefaultPetContent, resetDefaultPetToInitialPosition } from "./default-pet-controller.js";
 import { getLanStatusSnapshot } from "./lan-controller.js";
@@ -30,8 +33,11 @@ import { readSafePluginManifest } from "./plugin-manifest-reader.js";
 import { registerPluginAssetProtocol } from "./plugin-asset-protocol.js";
 import { checkForGitHubReleaseUpdate, getUpdateStatus, openUpdateReleasePage } from "./update-checker.js";
 import { getVoicePlatform } from "./voice-platform.js";
+import { getLocalTranscriptionService } from "./voice-local-transcription.js";
 import { getVoiceSecretStatus, setVoiceSecret, type VoiceSecretProviderId } from "./voice-secrets.js";
 import { getVoiceSettings, getVoiceSettingsSnapshot, updateVoiceSettings, voiceProviderIds, type VoiceProviderId } from "./voice-settings.js";
+import { getVoiceTranscriptionSettings, updateVoiceTranscriptionSettings } from "./voice-transcription-settings.js";
+import { getVisionSnapshot, invalidateVisionSummaryHealth, pauseVision, resumeVision, setVisionEnabled } from "./vision-service.js";
 
 type InternalUiWindowKind = "control-center";
 export type ControlCenterRoute = "dashboard" | "pets" | "settings" | "plugins" | "integrations";
@@ -61,10 +67,44 @@ function validateCompanionTargetId(value: unknown): CompanionTargetId {
   return value as CompanionTargetId;
 }
 
+function validateDesktopPermissionKind(value: unknown): DesktopPermissionKind {
+  if (value !== "microphone" && value !== "screen-recording") throw new Error("Invalid desktop permission.");
+  return value;
+}
+
+async function validateCodexSettingsPatch(patch: unknown): Promise<unknown> {
+  if (!isPlainObject(patch) || !isPlainObject(patch.codex)) return patch;
+  const codexPatch = patch.codex;
+  if (codexPatch.model !== undefined && typeof codexPatch.model !== "string") throw new Error("Invalid Codex model.");
+  if (codexPatch.reasoningEffort !== undefined && typeof codexPatch.reasoningEffort !== "string") throw new Error("Invalid Codex reasoning effort.");
+  const previous = getCompanionSettings().codex;
+  const modelChanged = Object.prototype.hasOwnProperty.call(codexPatch, "model");
+  const modelId = (typeof codexPatch.model === "string" ? codexPatch.model : previous.model).trim();
+  const reasoningEffort = (typeof codexPatch.reasoningEffort === "string"
+    ? codexPatch.reasoningEffort
+    : modelChanged ? "" : previous.reasoningEffort).trim();
+  const discovery = await getCodexAiBrain().discoverModels();
+  if (discovery.status !== "ready") throw new Error(discovery.reason ?? "Codex models are unavailable.");
+  const model = modelId
+    ? discovery.models.find((entry) => entry.id === modelId || entry.model === modelId)
+    : discovery.models.find((entry) => entry.isDefault) ?? discovery.models[0];
+  if (!model) throw new Error("The selected Codex model is no longer available.");
+  if (reasoningEffort && !model.supportedReasoningEfforts.some((entry) => entry.value === reasoningEffort)) {
+    throw new Error(`${model.displayName} does not support the selected reasoning effort.`);
+  }
+  return { ...patch, codex: { ...codexPatch, model: modelId ? model.model : "", reasoningEffort } };
+}
+
 function requireVoicePlatform() {
   const platform = getVoicePlatform();
   if (!platform) throw new Error("Voice platform is still starting.");
   return platform;
+}
+
+async function syncWakeFromSettings(): Promise<void> {
+  const wake = getVoicePlatform()?.wake;
+  if (!wake) return;
+  await wake.syncFromSettings();
 }
 
 function hasOpenInternalUiWindows(): boolean {
@@ -222,27 +262,61 @@ export function installInternalUiHandlers(): void {
     return getCompanionSettings();
   });
 
-  ipcMain.handle("openpets:companion-enable", (event) => {
+  ipcMain.handle("openpets:companion-enable", async (event) => {
     assertAllowedSender(event, ["control-center"]);
     const settings = enableCompanion();
+    await syncWakeFromSettings();
     trackDesktopEvent("desktop_companion_enabled", { frequency: settings.proactivity.frequency, target: settings.target });
     return settings;
   });
 
-  ipcMain.handle("openpets:companion-disable", (event) => {
+  ipcMain.handle("openpets:companion-disable", async (event) => {
     assertAllowedSender(event, ["control-center"]);
     const settings = disableCompanion();
     getVoicePlatform()?.companion.cancelAll();
+    await syncWakeFromSettings();
     trackDesktopEvent("desktop_companion_disabled");
     return settings;
   });
 
-  ipcMain.handle("openpets:companion-settings-update", (event, patch: unknown) => {
+  ipcMain.handle("openpets:companion-settings-update", async (event, patch: unknown) => {
     assertAllowedSender(event, ["control-center"]);
-    const previousTarget = getCompanionSettings().target;
-    const settings = updateCompanionSettings(patch);
-    if (settings.target !== previousTarget) getVoicePlatform()?.companion.cancelAll();
-    debug("companion", "settings updated", { enabled: settings.enabled, target: settings.target, memoryEnabled: settings.memory.enabled, proactivityEnabled: settings.proactivity.enabled, frequency: settings.proactivity.frequency, pluginContext: settings.context.pluginEnabled, sensitivePluginContext: settings.context.sensitivePluginEnabled, screenContext: settings.context.screenEnabled });
+    const previous = getCompanionSettings();
+    const wakePatch = isPlainObject(patch) && isPlainObject(patch.wake) ? patch.wake : null;
+    const wakeChanged = typeof wakePatch?.enabled === "boolean" && wakePatch.enabled !== previous.wake.enabled;
+    const enablingWake = wakeChanged && wakePatch?.enabled === true;
+    if (enablingWake) {
+      if (!previous.enabled) throw new Error("Enable Companion before wake listening.");
+      if (!getVoiceSettings().wake.phrase.trim()) throw new Error("Choose a wake phrase first.");
+      const health = requireVoicePlatform().wake.health();
+      if (!health.ready) throw new Error(health.reason ?? "Wake listening is unavailable.");
+      const transcription = await requireVoicePlatform().transcription.health();
+      if (!transcription.ready) throw new Error(transcription.reason ?? "Configure speech recognition before enabling wake listening.");
+    }
+
+    const validatedPatch = await validateCodexSettingsPatch(patch);
+    const settings = updateCompanionSettings(validatedPatch);
+    const codexChanged = settings.codex.model !== previous.codex.model || settings.codex.reasoningEffort !== previous.codex.reasoningEffort;
+    if (settings.target !== previous.target) getVoicePlatform()?.companion.cancelAll();
+    if (settings.target !== previous.target || codexChanged) {
+      getCodexAiBrain().invalidateImageSummaryHealth();
+      invalidateVisionSummaryHealth();
+    }
+    if (wakeChanged) {
+      try {
+        await syncWakeFromSettings();
+      } catch (error) {
+        if (enablingWake) {
+          updateCompanionSettings({ wake: { enabled: false } });
+          await syncWakeFromSettings().catch(() => undefined);
+        }
+        warn("companion", "wake settings could not be applied", {
+          reason: error instanceof Error ? error.message : "unknown",
+        });
+        throw error;
+      }
+    }
+    debug("companion", "settings updated", { enabled: settings.enabled, target: settings.target, memoryEnabled: settings.memory.enabled, proactivityEnabled: settings.proactivity.enabled, frequency: settings.proactivity.frequency, pluginContext: settings.context.pluginEnabled, sensitivePluginContext: settings.context.sensitivePluginEnabled, screenContext: settings.context.screenEnabled, wakeEnabled: settings.wake.enabled });
     return settings;
   });
 
@@ -266,23 +340,61 @@ export function installInternalUiHandlers(): void {
     return requireVoicePlatform().companion.health(selected, force === true);
   });
 
-  ipcMain.handle("openpets:companion-send", async (event, request: unknown) => {
+  ipcMain.handle("openpets:codex-models", async (event, force: unknown) => {
     assertAllowedSender(event, ["control-center"]);
-    if (!isPlainObject(request) || typeof request.petId !== "string" || typeof request.text !== "string") throw new Error("Invalid companion message.");
-    return requireVoicePlatform().companion.sendUserTurn({ petId: request.petId, text: request.text, kind: "typed", speak: request.speak === true });
+    const snapshot = await getCodexAiBrain().discoverModels(force === true);
+    debug("ui", "Codex model catalog checked", {
+      status: snapshot.status,
+      models: snapshot.models.length,
+      force: force === true,
+      ...(snapshot.status === "ready" ? {} : { reason: snapshot.reason }),
+    });
+    return snapshot;
   });
 
-  ipcMain.handle("openpets:companion-cancel", (event, petId: unknown) => {
+  ipcMain.handle("openpets:permissions-snapshot", async (event) => {
     assertAllowedSender(event, ["control-center"]);
-    if (typeof petId !== "string") throw new Error("Invalid pet id.");
-    requireVoicePlatform().companion.cancel(petId);
-    return { ok: true } as const;
+    return getDesktopPermissionService().refresh();
   });
 
-  ipcMain.handle("openpets:companion-display-ack", (event, petId: unknown, token: unknown) => {
+  ipcMain.handle("openpets:permissions-request", async (event, kind: unknown) => {
     assertAllowedSender(event, ["control-center"]);
-    if (typeof petId !== "string" || typeof token !== "string" || token.length > 300) throw new Error("Invalid companion display acknowledgement.");
-    return { ok: requireVoicePlatform().companion.acknowledgeDisplay(petId, token) };
+    const permission = validateDesktopPermissionKind(kind);
+    const snapshot = await getDesktopPermissionService().request(permission);
+    debug("ui", "desktop permission requested", { permission, status: snapshot.permissions[permission].status, appLocation: snapshot.appLocation });
+    return snapshot;
+  });
+
+  ipcMain.handle("openpets:permissions-open-settings", async (event, kind: unknown) => {
+    assertAllowedSender(event, ["control-center"]);
+    return getDesktopPermissionService().openSettings(validateDesktopPermissionKind(kind));
+  });
+
+  ipcMain.handle("openpets:permissions-restart", (event) => {
+    assertAllowedSender(event, ["control-center"]);
+    restartOpenPetsForPermissions();
+  });
+
+  ipcMain.handle("openpets:vision-snapshot", async (event, forceHealth: unknown) => {
+    assertAllowedSender(event, ["control-center"]);
+    return getVisionSnapshot(forceHealth === true);
+  });
+
+  ipcMain.handle("openpets:vision-set-enabled", async (event, enabled: unknown) => {
+    assertAllowedSender(event, ["control-center"]);
+    if (typeof enabled !== "boolean") throw new Error("Invalid Vision setting.");
+    return setVisionEnabled(enabled);
+  });
+
+  ipcMain.handle("openpets:vision-pause", async (event, minutes: unknown) => {
+    assertAllowedSender(event, ["control-center"]);
+    if (minutes !== 30 && minutes !== 60 && minutes !== 90) throw new Error("Vision pause must be 30, 60, or 90 minutes.");
+    return pauseVision(minutes);
+  });
+
+  ipcMain.handle("openpets:vision-resume", async (event) => {
+    assertAllowedSender(event, ["control-center"]);
+    return resumeVision();
   });
 
   ipcMain.handle("openpets:get-lan-status", (event) => {
@@ -427,48 +539,200 @@ export function installInternalUiHandlers(): void {
     assertAllowedSender(event, ["control-center"]);
     if (!isPlainObject(patch)) throw new Error("Invalid plugin platform settings patch.");
     const { updatePluginPlatformSettings } = await import("./plugin-platform-settings.js");
-    return updatePluginPlatformSettings(patch as never);
+    const next = updatePluginPlatformSettings(patch as never);
+    invalidateVisionSummaryHealth();
+    return next;
   });
 
-  ipcMain.handle("openpets:plugin-platform-ai-key-set", async (event, key: unknown) => {
+  ipcMain.handle("openpets:host-ai-settings-get", async (event) => {
     assertAllowedSender(event, ["control-center"]);
-    const { getPluginHostCapabilitiesForUi } = await import("./plugin-host-capabilities.js");
-    const { hostSecretsOwner, hostAiApiKeySecret } = await import("./plugin-ai-gateway.js");
-    const capabilities = getPluginHostCapabilitiesForUi();
-    if (!capabilities) throw new Error("Plugin host capabilities are unavailable.");
-    if (key === null || key === "") { await capabilities.secretsStore.delete(hostSecretsOwner, hostAiApiKeySecret); return { ok: true, hasKey: false }; }
-    if (typeof key !== "string" || key.length > 4096) throw new Error("Invalid AI API key.");
-    await capabilities.secretsStore.set(hostSecretsOwner, hostAiApiKeySecret, key);
-    return { ok: true, hasKey: true };
+    const { getHostAiSettings } = await import("./host-ai-settings.js");
+    return getHostAiSettings();
   });
 
-  ipcMain.handle("openpets:plugin-platform-ai-key-status", async (event) => {
+  ipcMain.handle("openpets:host-ai-provider-update", async (event, provider: unknown, patch: unknown) => {
+    assertAllowedSender(event, ["control-center"]);
+    const { updateHostAiProviderConfig } = await import("./host-ai-settings.js");
+    const { getPluginHostCapabilitiesForUi } = await import("./plugin-host-capabilities.js");
+    const next = updateHostAiProviderConfig(provider, patch);
+    getPluginHostCapabilitiesForUi()?.aiGateway.invalidateHealth();
+    invalidateVisionSummaryHealth();
+    debug("ui", "AI Brain provider settings updated", { provider, model: typeof provider === "string" && provider in next.providers ? next.providers[provider as keyof typeof next.providers].model : undefined });
+    return next;
+  });
+
+  ipcMain.handle("openpets:host-ai-provider-select", async (event, provider: unknown) => {
+    assertAllowedSender(event, ["control-center"]);
+    const { setActiveHostAiProvider } = await import("./host-ai-settings.js");
+    const { getPluginHostCapabilitiesForUi } = await import("./plugin-host-capabilities.js");
+    const next = setActiveHostAiProvider(provider);
+    getPluginHostCapabilitiesForUi()?.aiGateway.invalidateHealth();
+    invalidateVisionSummaryHealth();
+    debug("ui", "active direct AI Brain selected", { provider });
+    return next;
+  });
+
+  ipcMain.handle("openpets:host-ai-health", async (event, provider: unknown, force: unknown) => {
+    assertAllowedSender(event, ["control-center"]);
+    const { isHostAiProviderId } = await import("./host-ai-settings.js");
+    if (!isHostAiProviderId(provider)) throw new Error("Unknown AI provider.");
+    const { getPluginHostCapabilitiesForUi } = await import("./plugin-host-capabilities.js");
+    const capabilities = getPluginHostCapabilitiesForUi();
+    if (!capabilities) throw new Error("AI Brain is still starting.");
+    return capabilities.aiGateway.probeHealth({ provider, force: force === true });
+  });
+
+  ipcMain.handle("openpets:host-ai-models", async (event, provider: unknown) => {
+    assertAllowedSender(event, ["control-center"]);
+    const { isHostAiProviderId } = await import("./host-ai-settings.js");
+    if (!isHostAiProviderId(provider)) throw new Error("Unknown AI provider.");
+    const { getPluginHostCapabilitiesForUi } = await import("./plugin-host-capabilities.js");
+    const capabilities = getPluginHostCapabilitiesForUi();
+    if (!capabilities) throw new Error("AI Brain is still starting.");
+    return capabilities.aiGateway.listModels(provider);
+  });
+
+  ipcMain.handle("openpets:host-ai-key-set", async (event, provider: unknown, key: unknown) => {
     assertAllowedSender(event, ["control-center"]);
     const { getPluginHostCapabilitiesForUi } = await import("./plugin-host-capabilities.js");
-    const { hostSecretsOwner, hostAiApiKeySecret } = await import("./plugin-ai-gateway.js");
+    const { isHostAiProviderId } = await import("./host-ai-settings.js");
+    const { hostSecretsOwner, hostAiApiKeySecretForProvider } = await import("./host-ai-gateway.js");
+    if (!isHostAiProviderId(provider) || provider === "ollama") throw new Error("This AI provider does not use an OpenPets API key.");
     const capabilities = getPluginHostCapabilitiesForUi();
-    if (!capabilities) return { hasKey: false };
-    return { hasKey: await capabilities.secretsStore.has(hostSecretsOwner, hostAiApiKeySecret) };
+    if (!capabilities) throw new Error("AI Brain is still starting.");
+    const secretKey = hostAiApiKeySecretForProvider(provider);
+    if (key === null || key === "") {
+      await capabilities.secretsStore.delete(hostSecretsOwner, secretKey);
+      capabilities.aiGateway.invalidateHealth();
+      invalidateVisionSummaryHealth();
+      return { provider, hasKey: false };
+    }
+    if (typeof key !== "string" || !key.trim() || key.length > 4096) throw new Error("Invalid AI API key.");
+    await capabilities.secretsStore.set(hostSecretsOwner, secretKey, key.trim());
+    capabilities.aiGateway.invalidateHealth();
+    invalidateVisionSummaryHealth();
+    return { provider, hasKey: true };
+  });
+
+  ipcMain.handle("openpets:host-ai-key-status", async (event) => {
+    assertAllowedSender(event, ["control-center"]);
+    const { getPluginHostCapabilitiesForUi } = await import("./plugin-host-capabilities.js");
+    const { hostAiProviderIds } = await import("./host-ai-settings.js");
+    const { hostSecretsOwner, hostAiApiKeySecretForProvider } = await import("./host-ai-gateway.js");
+    const capabilities = getPluginHostCapabilitiesForUi();
+    const result: Record<string, { hasKey: boolean }> = {};
+    for (const provider of hostAiProviderIds) {
+      result[provider] = { hasKey: capabilities ? await capabilities.secretsStore.has(hostSecretsOwner, hostAiApiKeySecretForProvider(provider)) : false };
+    }
+    return result;
   });
 
   ipcMain.handle("openpets:voice-settings-get", (event) => {
     assertAllowedSender(event, ["control-center"]);
-    return getVoiceSettingsSnapshot(getAppStateSnapshot().pets.installed);
+    const appState = getAppStateSnapshot();
+    return getVoiceSettingsSnapshot(appState.pets.installed.filter((pet) => pet.id === appState.preferences.defaultPetId));
+  });
+
+  ipcMain.handle("openpets:voice-transcription-settings-get", (event) => {
+    assertAllowedSender(event, ["control-center"]);
+    return getVoiceTranscriptionSettings();
+  });
+
+  ipcMain.handle("openpets:voice-transcription-settings-update", async (event, patch: unknown) => {
+    assertAllowedSender(event, ["control-center"]);
+    const settings = updateVoiceTranscriptionSettings(patch);
+    debug("ui", "speech recognition settings updated", { providerId: settings.providerId, model: settings.model });
+    await syncWakeFromSettings().catch((error) => {
+      debug("ui", "wake listening is waiting for speech recognition", { reason: error instanceof Error ? error.message : "unknown" });
+    });
+    return settings;
+  });
+
+  ipcMain.handle("openpets:voice-transcription-health", async (event) => {
+    assertAllowedSender(event, ["control-center"]);
+    return requireVoicePlatform().transcription.health();
+  });
+
+  ipcMain.handle("openpets:local-transcription-snapshot", (event) => {
+    assertAllowedSender(event, ["control-center"]);
+    const service = getLocalTranscriptionService();
+    if (!service) throw new Error("Built-in speech recognition is still starting.");
+    return service.snapshot();
+  });
+
+  ipcMain.handle("openpets:local-transcription-install", async (event) => {
+    assertAllowedSender(event, ["control-center"]);
+    const service = getLocalTranscriptionService();
+    if (!service) throw new Error("Built-in speech recognition is still starting.");
+    const snapshot = await service.install();
+    if (snapshot.status === "ready") {
+      await syncWakeFromSettings().catch(() => undefined);
+    }
+    return snapshot;
+  });
+
+  ipcMain.handle("openpets:pockettts-snapshot", async (event) => {
+    assertAllowedSender(event, ["control-center"]);
+    const { getPocketTtsService } = await import("./pockettts-service.js");
+    const service = getPocketTtsService();
+    if (!service) throw new Error("PocketTTS is still starting.");
+    return service.snapshot();
+  });
+
+  ipcMain.handle("openpets:pockettts-install-enable", async (event) => {
+    assertAllowedSender(event, ["control-center"]);
+    const { getPocketTtsService } = await import("./pockettts-service.js");
+    const service = getPocketTtsService();
+    if (!service) throw new Error("PocketTTS is still starting.");
+    const voiceId = getVoiceSettings().providers.pockettts.voiceId;
+    const snapshot = await service.installAndEnable(voiceId);
+    if (snapshot.status !== "ready") return snapshot;
+    updateVoiceSettings({
+      providers: { pockettts: { baseUrl: snapshot.baseUrl, voiceId } },
+      output: { providerId: "pockettts" },
+    });
+    getVoicePlatform()?.providers.invalidate("pockettts");
+    return service.snapshot();
+  });
+
+  ipcMain.handle("openpets:pockettts-start", async (event) => {
+    assertAllowedSender(event, ["control-center"]);
+    const { getPocketTtsService } = await import("./pockettts-service.js");
+    const service = getPocketTtsService();
+    if (!service) throw new Error("PocketTTS is still starting.");
+    const snapshot = await service.start(getVoiceSettings().providers.pockettts.voiceId);
+    getVoicePlatform()?.providers.invalidate("pockettts");
+    return snapshot;
+  });
+
+  ipcMain.handle("openpets:pockettts-stop", async (event) => {
+    assertAllowedSender(event, ["control-center"]);
+    const { getPocketTtsService } = await import("./pockettts-service.js");
+    const service = getPocketTtsService();
+    if (!service) throw new Error("PocketTTS is still starting.");
+    const snapshot = await service.stop();
+    if (getVoiceSettings().output.providerId === "pockettts") updateVoiceSettings({ output: { providerId: "system" } });
+    getVoicePlatform()?.providers.invalidate("pockettts");
+    return snapshot;
+  });
+
+  ipcMain.handle("openpets:pockettts-voices", async (event) => {
+    assertAllowedSender(event, ["control-center"]);
+    const { getPocketTtsService } = await import("./pockettts-service.js");
+    return getPocketTtsService()?.listVoices() ?? [];
   });
 
   ipcMain.handle("openpets:voice-settings-update", async (event, patch: unknown) => {
     assertAllowedSender(event, ["control-center"]);
     if (!isPlainObject(patch)) throw new Error("Invalid voice settings patch.");
-    if (isPlainObject(patch.wake) && patch.wake.enabled === true && !requireVoicePlatform().wake.health().ready) {
-      throw new Error(requireVoicePlatform().wake.health().reason);
-    }
-    if (isPlainObject(patch.conversation) && patch.conversation.target === "codex") {
-      const health = await requireVoicePlatform().companion.health("codex");
-      if (!health.ready) throw new Error(health.reason ?? "Codex CLI conversation is unavailable.");
-    }
     const settings = updateVoiceSettings(patch);
-    debug("ui", "voice settings updated", { providerId: settings.output.providerId, petOverrides: Object.keys(settings.petOverrides).length });
-    return getVoiceSettingsSnapshot(getAppStateSnapshot().pets.installed);
+    if (isPlainObject(patch.wake) && ("phrase" in patch.wake || "microphone" in patch.wake)) await syncWakeFromSettings();
+    debug("ui", "voice settings updated", {
+      providerId: settings.output.providerId,
+      wakeMicrophone: settings.wake.microphone ? "saved-device" : "system-default",
+    });
+    const appState = getAppStateSnapshot();
+    return getVoiceSettingsSnapshot(appState.pets.installed.filter((pet) => pet.id === appState.preferences.defaultPetId));
   });
 
   ipcMain.handle("openpets:voice-secret-status", async (event) => {
@@ -524,11 +788,6 @@ export function installInternalUiHandlers(): void {
     return { ok: true };
   });
 
-  ipcMain.handle("openpets:voice-listening-state-get", (event) => {
-    assertAllowedSender(event, ["control-center"]);
-    return requireVoicePlatform().listening.getSnapshot();
-  });
-
   ipcMain.handle("openpets:voice-conversation-health", async (event, force: unknown) => {
     assertAllowedSender(event, ["control-center"]);
     return requireVoicePlatform().companion.health("codex", force === true);
@@ -539,21 +798,39 @@ export function installInternalUiHandlers(): void {
     return requireVoicePlatform().wake.health();
   });
 
-  ipcMain.handle("openpets:voice-ptt-start", async (event, petId: unknown) => {
+  ipcMain.handle("openpets:voice-wake-snapshot", (event) => {
     assertAllowedSender(event, ["control-center"]);
-    if (typeof petId !== "string" || !/^[A-Za-z0-9._:-]{1,200}$/.test(petId)) throw new Error("Invalid push-to-talk pet.");
-    if (!getVoiceSettings().listening.pushToTalkEnabled) throw new Error("Enable push-to-talk in Voice Settings first.");
-    return requireVoicePlatform().listening.startPushToTalk(petId);
+    return requireVoicePlatform().wake.snapshot();
   });
 
-  ipcMain.handle("openpets:voice-ptt-stop", async (event) => {
+  ipcMain.handle("openpets:voice-wake-calibration-snapshot", (event) => {
     assertAllowedSender(event, ["control-center"]);
-    return requireVoicePlatform().listening.stopPushToTalk();
+    return requireVoicePlatform().wakeCalibration.snapshot();
   });
 
-  ipcMain.handle("openpets:voice-activity-cancel", async (event) => {
+  ipcMain.handle("openpets:voice-wake-calibration-start", async (event, phrase: unknown) => {
     assertAllowedSender(event, ["control-center"]);
-    return requireVoicePlatform().listening.cancel("control-center");
+    return requireVoicePlatform().wakeCalibration.start(phrase);
+  });
+
+  ipcMain.handle("openpets:voice-wake-calibration-cancel", async (event) => {
+    assertAllowedSender(event, ["control-center"]);
+    return requireVoicePlatform().wakeCalibration.cancel();
+  });
+
+  ipcMain.handle("openpets:voice-wake-calibration-save", async (event) => {
+    assertAllowedSender(event, ["control-center"]);
+    return requireVoicePlatform().wakeCalibration.save();
+  });
+
+  ipcMain.handle("openpets:voice-wake-calibration-delete-interpretation", async (event, value: unknown) => {
+    assertAllowedSender(event, ["control-center"]);
+    return requireVoicePlatform().wakeCalibration.deleteInterpretation(value);
+  });
+
+  ipcMain.handle("openpets:voice-wake-calibration-reset", async (event) => {
+    assertAllowedSender(event, ["control-center"]);
+    return requireVoicePlatform().wakeCalibration.reset();
   });
 
   ipcMain.handle("openpets:get-catalog", async (event) => {
@@ -797,6 +1074,22 @@ export function installInternalUiHandlers(): void {
   ipcMain.handle("openpets:agent-setup-command-paths", (event, patch: unknown) => {
     assertAllowedSender(event, ["control-center"]);
     return updateAgentSetupCommandPaths(patch);
+  });
+
+  ipcMain.handle("openpets:codex-reaction-preferences-update", async (event, patch: unknown) => {
+    assertAllowedSender(event, ["control-center"]);
+    if (typeof patch !== "object" || patch === null || Array.isArray(patch)) throw new Error("Invalid Codex reaction preferences.");
+    const record = patch as Record<string, unknown>;
+    const allowedKeys = ["taskStarted", "taskWorking", "taskCompleted"] as const;
+    const nextPatch: Partial<OpenPetsStateV1["integrations"]["codex"]["reactionPreferences"]> = {};
+    for (const key of allowedKeys) {
+      if (record[key] !== undefined) {
+        if (typeof record[key] !== "boolean") throw new Error("Invalid Codex reaction preference value.");
+        (nextPatch as Record<string, boolean>)[key] = record[key];
+      }
+    }
+    updateCodexReactionPreferences(nextPatch);
+    return getAgentSetupSnapshot();
   });
 
   ipcMain.handle("openpets:codex-review-hooks", async (event) => {

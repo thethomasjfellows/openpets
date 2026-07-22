@@ -1,23 +1,32 @@
-import { createEvidence, endpoint, readBoundedAudioResponse, sanitizeProviderError, withTimeout, type VoiceProviderAdapter } from "./voice-provider.js";
+import { createEvidence, endpoint, readBoundedAudioResponse, withTimeout, type VoiceProviderAdapter } from "./voice-provider.js";
 
 export const pocketTtsVoiceProvider: VoiceProviderAdapter = {
   id: "pockettts",
   async health(context) {
     const baseUrl = context.settings.providers.pockettts.baseUrl;
     if (!isLoopbackHttpUrl(baseUrl)) return createEvidence("pockettts", { configured: false, reachable: false, discoverySupported: false, synthesisTested: false, ready: false, method: "loopback-probe", reason: "PocketTTS must use a loopback HTTP URL." });
+    const managed = context.pocketTts?.snapshot();
+    if (managed && managed.status !== "ready" && managed.status !== "error") {
+      const reason = managed.status === "not-installed"
+        ? "PocketTTS is not installed. Choose Download & Enable PocketTTS."
+        : managed.status === "uv-missing"
+          ? "PocketTTS needs uv before OpenPets can install it."
+          : managed.progress ?? `PocketTTS is ${managed.status}.`;
+      return createEvidence("pockettts", { configured: true, reachable: false, discoverySupported: true, discoveryOk: true, synthesisTested: false, ready: false, method: "managed-local-service", reason });
+    }
     const controller = new AbortController();
     const timeout = withTimeout(controller.signal, 2_500);
     try {
       await (context.fetchImpl ?? fetch)(baseUrl, { method: "GET", signal: timeout.signal, redirect: "error" });
-      return createEvidence("pockettts", { configured: true, reachable: true, discoverySupported: false, synthesisTested: false, ready: true, method: "loopback-probe" });
+      return createEvidence("pockettts", { configured: true, reachable: true, discoverySupported: true, discoveryOk: true, synthesisTested: false, ready: true, method: "loopback-probe", version: managed?.packageVersion });
     } catch (error) {
-      return createEvidence("pockettts", { configured: true, reachable: false, discoverySupported: false, synthesisTested: false, ready: false, method: "loopback-probe", reason: sanitizeProviderError(error) });
+      return createEvidence("pockettts", { configured: true, reachable: false, discoverySupported: true, discoveryOk: true, synthesisTested: false, ready: false, method: "loopback-probe", reason: managed?.error ?? "PocketTTS is not running at the configured local URL." });
     } finally {
       timeout.dispose();
     }
   },
   async listVoices(context) {
-    return { supported: false, voices: [], evidence: await this.health(context) };
+    return { supported: true, voices: [...(context.pocketTts?.listVoices() ?? [])], evidence: await this.health(context) };
   },
   async synthesize(request, context) {
     const config = context.settings.providers.pockettts;

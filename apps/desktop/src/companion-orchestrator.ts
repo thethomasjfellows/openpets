@@ -1,4 +1,4 @@
-import { buildCompanionContext, type CompanionPluginFact } from "./companion-context.js";
+import { buildCompanionContext, type CompanionPluginFact, type CompanionVisionSummary } from "./companion-context.js";
 import {
   commitCompanionAssistantTurn,
   commitCompanionProactiveTurn,
@@ -25,12 +25,18 @@ export type CompanionProactiveTurnMetadata = CompanionProactiveMemoryMetadata & 
   readonly expiresAt: number;
 };
 
+type CompanionProactiveTurnValidator = (input: {
+  readonly petId: string;
+  readonly proactive: CompanionProactiveTurnMetadata;
+  readonly now: number;
+}) => boolean;
+
 export type CompanionTurnRequest = {
   readonly petId: string;
   readonly text: string;
   readonly kind: CompanionTurnKind;
   readonly speak?: boolean;
-  readonly pluginFacts?: readonly CompanionPluginFact[];
+  readonly pluginFactIds?: readonly string[];
   readonly proactive?: CompanionProactiveTurnMetadata;
 };
 
@@ -71,9 +77,12 @@ export class CompanionOrchestrator {
   readonly #targets: ReadonlyMap<CompanionTargetId, CompanionTarget>;
   readonly #output: CompanionVoiceOutput;
   readonly #pluginFacts: (petId: string) => readonly CompanionPluginFact[];
+  readonly #pluginFactsById: (petId: string, ids: readonly string[]) => readonly CompanionPluginFact[];
+  readonly #visionSummaries: (petId: string, now: number) => readonly CompanionVisionSummary[];
+  readonly #isProactiveTurnValid: CompanionProactiveTurnValidator;
   readonly #getSettings: typeof getCompanionSettings;
   readonly #getAppState: () => CompanionAppStateSnapshot;
-  readonly #showBubble: (petId: string, text: string) => boolean;
+  readonly #showBubble: (petId: string, text: string, options?: { readonly suppressNarration?: boolean }) => boolean;
   readonly #now: () => number;
   readonly #log: CompanionLog;
   readonly #runtime = new Map<string, PetRuntime>();
@@ -83,15 +92,21 @@ export class CompanionOrchestrator {
     readonly targets: readonly CompanionTarget[];
     readonly output: CompanionVoiceOutput;
     readonly getPluginFacts?: (petId: string) => readonly CompanionPluginFact[];
+    readonly getPluginFactsById?: (petId: string, ids: readonly string[]) => readonly CompanionPluginFact[];
+    readonly getVisionSummaries?: (petId: string, now: number) => readonly CompanionVisionSummary[];
+    readonly isProactiveTurnValid?: CompanionProactiveTurnValidator;
     readonly getSettings?: typeof getCompanionSettings;
     readonly getAppState: () => CompanionAppStateSnapshot;
-    readonly showBubble: (petId: string, text: string) => boolean;
+    readonly showBubble: (petId: string, text: string, options?: { readonly suppressNarration?: boolean }) => boolean;
     readonly now?: () => number;
     readonly log?: CompanionLog;
   }) {
     this.#targets = new Map(options.targets.map((target) => [target.id, target]));
     this.#output = options.output;
     this.#pluginFacts = options.getPluginFacts ?? (() => []);
+    this.#pluginFactsById = options.getPluginFactsById ?? (() => []);
+    this.#visionSummaries = options.getVisionSummaries ?? (() => []);
+    this.#isProactiveTurnValid = options.isProactiveTurnValid ?? (() => true);
     this.#getSettings = options.getSettings ?? getCompanionSettings;
     this.#getAppState = options.getAppState;
     this.#showBubble = options.showBubble;
@@ -128,7 +143,7 @@ export class CompanionOrchestrator {
       runtime.thinking = false;
       runtime.speaking = false;
     }
-    this.#output.cancel({ kind: "installed-pet", petId });
+    this.#cancelOutput(petId);
     for (const [token, pending] of this.#pendingDisplays) if (pending.petId === petId) this.#pendingDisplays.delete(token);
     this.#log("debug", "turn cancelled", { petId });
   }
@@ -146,7 +161,7 @@ export class CompanionOrchestrator {
       runtime.activeKind = undefined;
       runtime.thinking = false;
       runtime.speaking = false;
-      this.#output.cancel({ kind: "installed-pet", petId: runtimePetId });
+      this.#cancelOutput(runtimePetId);
       this.#log("debug", "proactive turn cancelled", { petId: runtimePetId });
     }
     for (const [token, pending] of this.#pendingDisplays) {
@@ -178,6 +193,14 @@ export class CompanionOrchestrator {
     for (const target of this.#targets.values()) target.dispose();
   }
 
+  #cancelOutput(petId: string): void {
+    try {
+      this.#output.cancel({ kind: "installed-pet", petId });
+    } catch {
+      this.#log("debug", "voice output cancellation skipped because the pet target is unavailable", { petId });
+    }
+  }
+
   async #send(request: CompanionTurnRequest): Promise<CompanionTurnResult> {
     const text = normalizeTurnText(request.text);
     const turnNow = this.#now();
@@ -185,7 +208,10 @@ export class CompanionOrchestrator {
     if (!initialSettings.enabled || initialSettings.consentVersion !== 1) throw new Error("Enable Companion for this pet before starting a conversation.");
     if (request.kind === "proactive") {
       if (!initialSettings.proactivity.enabled) throw new Error("Proactive companion check-ins are disabled.");
-      if (!request.proactive || !Number.isFinite(request.proactive.expiresAt) || turnNow >= request.proactive.expiresAt) {
+      if (!request.proactive
+        || !Number.isFinite(request.proactive.expiresAt)
+        || turnNow >= request.proactive.expiresAt
+        || !this.#isProactiveTurnValid({ petId: request.petId, proactive: request.proactive, now: turnNow })) {
         throw new Error("The proactive companion opportunity is no longer available.");
       }
     }
@@ -216,7 +242,7 @@ export class CompanionOrchestrator {
     runtime.thinking = true;
     runtime.speaking = false;
     this.#runtime.set(pet.id, runtime);
-    this.#output.cancel({ kind: "installed-pet", petId: pet.id });
+    this.#cancelOutput(pet.id);
 
     try {
       const health = await waitForAbort(target.health(), controller.signal);
@@ -236,11 +262,15 @@ export class CompanionOrchestrator {
         memory,
         time: resolveCompanionTimeState(new Date(turnNow), appState.analytics.lastActivityAt),
         interaction: { kind: request.kind === "proactive" ? "proactive" : "user", text },
-        pluginFacts: settings.context.pluginEnabled ? [...this.#pluginFacts(pet.id), ...(request.pluginFacts ?? [])] : [],
+        visionSummaries: this.#visionSummaries(pet.id, turnNow),
+        pluginFacts: settings.context.pluginEnabled
+          ? [...this.#pluginFacts(pet.id), ...this.#pluginFactsById(pet.id, request.pluginFactIds ?? [])]
+              .filter((fact) => fact.sensitivity !== "sensitive" || settings.context.sensitivePluginEnabled)
+          : [],
         now: turnNow,
       });
 
-      this.#log("info", "turn started", { petId: pet.id, targetId: target.id, kind: request.kind, inputLength: text.length, promptLength: context.prompt.length, memoryEntries: context.selectedMemory.length, pluginFacts: context.selectedPluginFacts.length, generation });
+      this.#log("info", "turn started", { petId: pet.id, targetId: target.id, kind: request.kind, inputLength: text.length, promptLength: context.prompt.length, memoryEntries: context.selectedMemory.length, visionSummaries: context.selectedVisionSummaries.length, pluginFacts: context.selectedPluginFacts.length, generation });
 
       let result: CompanionTargetResult;
       try {
@@ -254,12 +284,43 @@ export class CompanionOrchestrator {
       const currentSettings = this.#assertCurrentTurn(runtime, generation, controller, target.id, request);
       const responseText = normalizeResponseText(result.text);
       runtime.sessionId = result.sessionId;
-      const displayed = this.#showBubble(pet.id, responseText);
       const role = request.kind === "proactive" ? "proactive" as const : "assistant" as const;
       const proactive = request.proactive ? toMemoryMetadata(request.proactive) : undefined;
+      let displayed = false;
+      let spoken = false;
+
+      if (request.speak === true) {
+        // Keep the existing working bubble visible while the provider
+        // synthesizes. The pet renderer replaces it with a progressive
+        // response caption only when playback actually starts.
+        runtime.thinking = false;
+        runtime.speaking = true;
+        const speech = await this.#output.speak({
+          text: responseText,
+          reason: "conversation",
+          target: { kind: "installed-pet", petId: pet.id },
+          overlapPolicy: "interrupt",
+          progressiveCaption: true,
+        });
+        if (controller.signal.aborted || runtime.generation !== generation) {
+          this.#log("debug", "stale speech completion ignored", { petId: pet.id, generation });
+          throw abortError();
+        }
+        const postSpeechSettings = this.#assertCurrentTurn(runtime, generation, controller, target.id, request);
+        spoken = speech.ok;
+        runtime.speaking = false;
+        // Persist the completed response in the host controller so a later
+        // refresh or display timer cannot resurrect the working message.
+        displayed = this.#showBubble(pet.id, responseText, { suppressNarration: true });
+        if (!speech.ok) this.#log("warn", "turn displayed but speech failed", { petId: pet.id, attempts: speech.attempts.length });
+        if (displayed && postSpeechSettings.memory.enabled) this.#commitDisplayed(pet.id, responseText, role, proactive);
+      } else {
+        displayed = this.#showBubble(pet.id, responseText);
+      }
+
       let displayToken: string | undefined;
       if (displayed) {
-        if (currentSettings.memory.enabled) this.#commitDisplayed(pet.id, responseText, role, proactive);
+        if (request.speak !== true && currentSettings.memory.enabled) this.#commitDisplayed(pet.id, responseText, role, proactive);
       } else {
         const createdAt = this.#now();
         displayToken = `display:${pet.id}:${generation}:${createdAt}`;
@@ -274,18 +335,6 @@ export class CompanionOrchestrator {
       }
 
       runtime.thinking = false;
-      let spoken = false;
-      if (request.speak === true && displayed) {
-        runtime.speaking = true;
-        const speech = await this.#output.speak({ text: responseText, reason: "conversation", target: { kind: "installed-pet", petId: pet.id }, overlapPolicy: "interrupt" });
-        if (controller.signal.aborted || runtime.generation !== generation) {
-          this.#log("debug", "stale speech completion ignored", { petId: pet.id, generation });
-        } else {
-          spoken = speech.ok;
-          runtime.speaking = false;
-          if (!speech.ok) this.#log("warn", "turn displayed but speech failed", { petId: pet.id, attempts: speech.attempts.length });
-        }
-      }
       this.#log("info", "turn completed", { petId: pet.id, targetId: target.id, kind: request.kind, responseLength: responseText.length, displayed, spoken, generation });
       return { petId: pet.id, text: responseText, targetId: target.id, displayed, spoken, ...(displayToken ? { displayToken } : {}) };
     } catch (error) {
@@ -316,7 +365,8 @@ export class CompanionOrchestrator {
       && (!settings.proactivity.enabled
         || !request.proactive
         || !Number.isFinite(request.proactive.expiresAt)
-        || this.#now() >= request.proactive.expiresAt)) throw abortError();
+        || this.#now() >= request.proactive.expiresAt
+        || !this.#isProactiveTurnValid({ petId: request.petId, proactive: request.proactive, now: this.#now() }))) throw abortError();
     return settings;
   }
 

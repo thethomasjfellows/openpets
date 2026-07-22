@@ -1,5 +1,9 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { homedir } from "node:os";
+import { chmodSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { createCodexChildEnvironment } from "@open-pets/codex";
 
 import type { VoiceConversationEvent, VoiceConversationHealth, VoiceConversationRequest, VoiceConversationResult, VoiceConversationTarget } from "./voice-conversation-targets.js";
 
@@ -8,35 +12,61 @@ type CodexProbe = () => Promise<{ version: string; execHelp: string; resumeHelp:
 
 const maxStdoutBytes = 2 * 1024 * 1024;
 const maxStderrBytes = 64 * 1024;
+const codexConversationIsolationArgs = [
+  "--ignore-user-config",
+  "--ignore-rules",
+  "--disable", "shell_tool",
+  "--disable", "shell_snapshot",
+  "--disable", "tool_suggest",
+  "--disable", "plugins",
+  "--disable", "plugin_sharing",
+  "--disable", "remote_plugin",
+  "--config", "sandbox_mode=\"read-only\"",
+] as const;
 
 export class CodexConversationTarget implements VoiceConversationTarget {
   readonly id = "codex" as const;
   readonly #command: string;
+  readonly #commandPrefixArgs: readonly string[];
   readonly #cwd: string;
   readonly #runOverride?: CodexRun;
   readonly #probeOverride?: CodexProbe;
+  readonly #getModel: () => string | Promise<string>;
+  readonly #getReasoningEffort: () => string | Promise<string>;
+  readonly #ownsCwd: boolean;
   readonly #children = new Set<ChildProcessWithoutNullStreams>();
   #health: VoiceConversationHealth | null = null;
 
-  constructor(options: { command?: string; cwd?: string; run?: CodexRun; probe?: CodexProbe } = {}) {
+  constructor(options: { command?: string; commandPrefixArgs?: readonly string[]; cwd?: string; run?: CodexRun; probe?: CodexProbe; getModel?: () => string | Promise<string>; getReasoningEffort?: () => string | Promise<string> } = {}) {
     this.#command = options.command ?? "codex";
-    this.#cwd = options.cwd ?? homedir();
+    this.#commandPrefixArgs = options.commandPrefixArgs ?? [];
+    this.#cwd = options.cwd ?? createPrivateCodexWorkspace();
+    this.#ownsCwd = options.cwd === undefined;
     this.#runOverride = options.run;
     this.#probeOverride = options.probe;
+    this.#getModel = options.getModel ?? (() => "");
+    this.#getReasoningEffort = options.getReasoningEffort ?? (() => "");
   }
 
   async health(force = false): Promise<VoiceConversationHealth> {
     if (!force && this.#health && Date.now() - this.#health.checkedAt < 30_000) return this.#health;
     try {
       const probe = this.#probeOverride ? await this.#probeOverride() : await this.#probe();
-      const ready = /--json\b/.test(probe.execHelp) && /\bresume\b/.test(probe.execHelp) && /\[SESSION_ID\]/.test(probe.resumeHelp) && /--json\b/.test(probe.resumeHelp);
+      const ready = /--json\b/.test(probe.execHelp)
+        && /\bresume\b/.test(probe.execHelp)
+        && /--ignore-user-config\b/.test(probe.execHelp)
+        && /--disable\b/.test(probe.execHelp)
+        && /\[SESSION_ID\]/.test(probe.resumeHelp)
+        && /--json\b/.test(probe.resumeHelp)
+        && /--ignore-user-config\b/.test(probe.resumeHelp)
+        && /--disable\b/.test(probe.resumeHelp);
       this.#health = {
         targetId: "codex",
         checkedAt: Date.now(),
         ready,
         method: "codex --version and machine-readable exec/resume capability probe",
         version: probe.version.trim().slice(0, 120),
-        reason: ready ? undefined : "This Codex CLI does not expose the required JSON exec/resume contract.",
+        reason: ready ? undefined : "This Codex CLI does not expose the required isolated JSON exec/resume contract. Update Codex and try again.",
       };
     } catch (error) {
       this.#health = { targetId: "codex", checkedAt: Date.now(), ready: false, method: "Codex CLI capability probe", reason: cleanError(error) };
@@ -53,9 +83,20 @@ export class CodexConversationTarget implements VoiceConversationTarget {
     return this.#runOverride ? this.#runOverride({ ...request, text }) : this.#runCli({ ...request, text });
   }
 
+  async analyzeImage(request: { readonly text: string; readonly imagePath: string; readonly signal: AbortSignal }): Promise<VoiceConversationResult> {
+    const text = request.text.trim();
+    if (!text || text.length > 8_000) throw new Error("Image analysis text must contain 1–8000 characters.");
+    if (!request.imagePath) throw new Error("Image analysis requires a local image.");
+    if (request.signal.aborted) throw abortError();
+    const health = await this.health();
+    if (!health.ready) throw new Error(health.reason ?? "Codex CLI image analysis is unavailable.");
+    return this.#runCli({ text, signal: request.signal }, { imagePath: request.imagePath, ephemeral: true });
+  }
+
   dispose(): void {
     for (const child of this.#children) terminateChild(child);
     this.#children.clear();
+    if (this.#ownsCwd) rmSync(this.#cwd, { recursive: true, force: true });
   }
 
   async #probe(): Promise<{ version: string; execHelp: string; resumeHelp: string }> {
@@ -73,10 +114,17 @@ export class CodexConversationTarget implements VoiceConversationTarget {
     return this.#spawnAndCollect(args, controller.signal, limit).finally(() => clearTimeout(timer));
   }
 
-  async #runCli(request: VoiceConversationRequest): Promise<VoiceConversationResult> {
-    const args = request.sessionId
-      ? ["exec", "resume", "--json", request.sessionId, request.text]
-      : ["exec", "--json", "--skip-git-repo-check", request.text];
+  async #runCli(request: VoiceConversationRequest, options: { readonly imagePath?: string; readonly ephemeral?: boolean } = {}): Promise<VoiceConversationResult> {
+    const [model, reasoningEffort] = await Promise.all([this.#getModel(), this.#getReasoningEffort()]);
+    if (request.signal.aborted) throw abortError();
+    const args = buildCodexExecArgs({
+      text: request.text,
+      sessionId: request.sessionId,
+      model,
+      reasoningEffort,
+      imagePath: options.imagePath,
+      ephemeral: options.ephemeral,
+    });
     const output = await this.#spawnAndCollect(args, request.signal, maxStdoutBytes, request.onEvent);
     let sessionId = request.sessionId ?? "";
     let finalText = "";
@@ -94,8 +142,18 @@ export class CodexConversationTarget implements VoiceConversationTarget {
   }
 
   #spawnAndCollect(args: string[], signal: AbortSignal, limit: number, onEvent?: (event: VoiceConversationEvent) => void): Promise<string> {
+    if (signal.aborted) return Promise.reject(abortError());
     return new Promise((resolve, reject) => {
-      const child = spawn(this.#command, args, { cwd: this.#cwd, env: process.env, shell: false, windowsHide: true });
+      const child = spawn(this.#command, [...this.#commandPrefixArgs, ...args], {
+        cwd: this.#cwd,
+        env: createCodexConversationEnvironment(process.env, this.#command),
+        shell: false,
+        windowsHide: true,
+      });
+      // Codex accepts additional prompt content from stdin. The request is
+      // already an argv item, so EOF must be delivered immediately or the CLI
+      // waits indefinitely for more input.
+      child.stdin.end();
       this.#children.add(child);
       let stdout = "";
       let stderr = "";
@@ -143,6 +201,39 @@ export class CodexConversationTarget implements VoiceConversationTarget {
       });
     });
   }
+}
+
+export function createCodexConversationEnvironment(source: Readonly<NodeJS.ProcessEnv>, command = "codex"): NodeJS.ProcessEnv {
+  return createCodexChildEnvironment(source, command);
+}
+
+export function createPrivateCodexWorkspace(): string {
+  const workspace = mkdtempSync(join(tmpdir(), "openpets-codex-workspace-"));
+  try { chmodSync(workspace, 0o700); } catch { /* best effort on platforms without POSIX modes */ }
+  return workspace;
+}
+
+export function buildCodexExecArgs(options: {
+  readonly text: string;
+  readonly sessionId?: string;
+  readonly model?: string;
+  readonly reasoningEffort?: string;
+  readonly imagePath?: string;
+  readonly ephemeral?: boolean;
+}): string[] {
+  const model = options.model?.trim().slice(0, 120) ?? "";
+  const modelArgs = model ? ["--model", model] : [];
+  const effort = options.reasoningEffort?.trim().slice(0, 40) ?? "";
+  const effortArgs = effort ? ["--config", `model_reasoning_effort=${JSON.stringify(effort)}`] : [];
+  const imageArgs = options.imagePath ? ["--image", options.imagePath] : [];
+  const ephemeralArgs = options.ephemeral ? ["--ephemeral"] : [];
+  // `--image <FILE>...` is variadic in Codex. Without the option terminator,
+  // Clap consumes the trailing prompt as a second image path and Codex falls
+  // back to stdin, which this non-interactive target intentionally closes.
+  const promptBoundary = options.imagePath ? ["--"] : [];
+  return options.sessionId
+    ? ["exec", "resume", "--json", "--skip-git-repo-check", ...codexConversationIsolationArgs, ...modelArgs, ...effortArgs, options.sessionId, options.text]
+    : ["exec", "--json", "--skip-git-repo-check", ...codexConversationIsolationArgs, ...ephemeralArgs, ...modelArgs, ...effortArgs, ...imageArgs, ...promptBoundary, options.text];
 }
 
 export function parseCodexJsonLine(line: string): VoiceConversationEvent | null {

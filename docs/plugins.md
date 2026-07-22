@@ -50,7 +50,7 @@ a handle returned by `ctx.pets.spawn()` targets only that calling plugin's live
 pet. The host applies the target pet's voice override and fallbacks. Plugins
 never receive provider credentials or generated audio. `ctx.voice.listen()`
 remains one-shot, permission-gated, non-ambient, and uses the same host-owned
-capture/privacy surface as push-to-talk.
+capture/privacy surface reserved for explicit plugin microphone requests.
 
 `ctx.companion` is intentionally weaker than speech or provider access. A plugin
 may contribute short-lived factual context or offer a short-lived proactive
@@ -145,6 +145,8 @@ The `companion:context` permission unlocks three SDK calls:
 approval alone is not consent to disclose data. The host accepts normal
 contributions only while Companion and **Plugin context** are enabled, and
 sensitive contributions additionally require **Sensitive plugin context**.
+The permission is classified as sensitive at both manifest validation and UI
+approval boundaries because its text may be placed in an AI prompt.
 Disabled plugins are ignored and their retained contributions are cleared on
 teardown. Calls are rate-limited to 20 per minute.
 
@@ -155,6 +157,16 @@ a plugin that needs restart continuity stores its own domain state and
 contributes the current fact/opportunity again. Contributions belong to the
 active default companion. This first contract deliberately has no pet-handle
 override, so plugins cannot retarget context to spawned or agent pets.
+
+This is a host-mediated context channel, not direct access to the selected AI
+provider. A plugin cannot call Codex, inherit the user's Codex MCP servers,
+install an MCP server into Companion conversations, inspect conversation
+history, or receive the Brain's response through this permission. If Codex is
+the active Brain, OpenPets quotes approved contributions as untrusted context in
+the bounded prompt while Codex still runs with user config, plugins, rules,
+shell tooling, and global MCPs disabled. A Screenpipe-style plugin should use
+this permission to contribute expiring screen observations; any future callable
+plugin tool contract must be a separate explicit permission and API.
 
 An opportunity carries factual `context`, low/normal urgency, an eligibility
 window, a dedupe key, and optional cooldown. The host can ignore it for consent,
@@ -228,6 +240,10 @@ mirror of all this is the SDK in [sdk.md](sdk.md).
   quiet-hours check reused by host speech and proactive check-ins. Provider
   settings are owned by `host-ai-settings.ts`; configured legacy `ai` data is
   migrated out of `openpets-plugin-platform.json`.
+- Plugins currently use the one globally selected AI Brain when an approved
+  host capability needs inference. Provider profiles have stable IDs so a
+  future plugin-level override can reference one without duplicating provider
+  credentials, but plugins do not select or override a profile today.
 - `plugin-user-sound-store.ts` — stores imported user sounds as opaque refs, not
   raw filesystem paths.
 - `plugin-i18n.ts` — resolves plugin locales, manifest `$t:`, and `ctx.t()`.

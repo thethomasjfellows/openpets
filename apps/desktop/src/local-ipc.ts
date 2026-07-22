@@ -6,6 +6,7 @@ import { Notification, shell, systemPreferences } from "electron";
 import { applyAgentPetReaction, applyAgentPetSay, applyAgentPetShowMedia, clearAgentPetLeaseState, repositionConfinedPet, showAgentPet } from "./agent-pet-controller.js";
 import { classifyAnalyticsError, trackDesktopEvent, trackDesktopIntegrationActivity } from "./analytics.js";
 import { getAppStateSnapshot, recordCodexIntegrationEvent, recordOpenPetsActivity } from "./app-state.js";
+import { isCodexLifecycleReactionEnabled } from "./codex-reaction-preferences.js";
 import { builtInPet } from "./built-in-pet.js";
 import { applyExternalPetReaction, applyExternalPetSay, applyExternalPetShowMedia, getDefaultPetPaused, isDefaultPetVisible } from "./default-pet-controller.js";
 import { createStaleLeaseStatus, LeaseManager } from "./lease-manager.js";
@@ -338,9 +339,10 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
 
   if (request.method === "integration.event") {
     const event = validateIntegrationEvent(request.params);
-    recordCodexIntegrationEvent(event);
-    debug("ipc", "integration event received", { integrationId: event.integrationId, lifecycle: event.lifecycle });
-    return { ok: true, integrationId: event.integrationId, lifecycle: event.lifecycle };
+    const state = recordCodexIntegrationEvent(event);
+    const reactionEnabled = isCodexLifecycleReactionEnabled(state.integrations.codex.reactionPreferences, event.lifecycle);
+    debug("ipc", "integration event received", { integrationId: event.integrationId, lifecycle: event.lifecycle, reactionEnabled });
+    return { ok: true, integrationId: event.integrationId, lifecycle: event.lifecycle, reactionEnabled };
   }
 
   if (request.method === "pets.install") {

@@ -14,6 +14,9 @@ import { debug, info, warn } from "./logger.js";
 import { applyExternalPetReaction, getDefaultPetPaused, isDefaultPetVisible } from "./default-pet-controller.js";
 import { isInQuietHours } from "./plugin-platform-settings.js";
 import type { VoiceListeningSnapshot } from "./voice-listening-service.js";
+import type { VoiceOutputActivitySnapshot } from "./voice-output-service.js";
+import type { VoiceWakeSnapshot } from "./voice-wake-types.js";
+import type { VisionProactiveOpportunity } from "./vision-service.js";
 
 export type CompanionProactiveOpportunity = CompanionProactiveCandidate & {
   readonly text: string;
@@ -24,7 +27,10 @@ export type CompanionProactiveOpportunity = CompanionProactiveCandidate & {
 export class CompanionProactiveService {
   readonly #orchestrator: CompanionOrchestrator;
   readonly #listening: () => VoiceListeningSnapshot;
+  readonly #wake: () => VoiceWakeSnapshot;
+  readonly #outputActivity: () => VoiceOutputActivitySnapshot;
   readonly #opportunities: () => readonly CompanionProactiveOpportunity[];
+  readonly #visionOpportunities: (petId: string, now: number) => readonly VisionProactiveOpportunity[];
   readonly #consumeOpportunity: (id: string) => void;
   readonly #history: CompanionProactiveDelivery[] = [];
   #timer: NodeJS.Timeout | null = null;
@@ -37,12 +43,25 @@ export class CompanionProactiveService {
   constructor(options: {
     readonly orchestrator: CompanionOrchestrator;
     readonly getListeningSnapshot: () => VoiceListeningSnapshot;
+    readonly getWakeSnapshot?: () => VoiceWakeSnapshot;
+    readonly getOutputActivity?: () => VoiceOutputActivitySnapshot;
     readonly getOpportunities?: () => readonly CompanionProactiveOpportunity[];
+    readonly getVisionOpportunities?: (petId: string, now: number) => readonly VisionProactiveOpportunity[];
     readonly consumeOpportunity?: (id: string) => void;
   }) {
     this.#orchestrator = options.orchestrator;
     this.#listening = options.getListeningSnapshot;
+    this.#wake = options.getWakeSnapshot ?? (() => ({
+      checkedAt: Date.now(),
+      enabled: false,
+      armed: false,
+      captureState: "disabled",
+      turnState: "idle",
+      phraseConfigured: false,
+    }));
+    this.#outputActivity = options.getOutputActivity ?? (() => ({ active: false, activePetIds: [], activeReasons: [] }));
     this.#opportunities = options.getOpportunities ?? (() => []);
+    this.#visionOpportunities = options.getVisionOpportunities ?? (() => []);
     this.#consumeOpportunity = options.consumeOpportunity ?? (() => undefined);
   }
 
@@ -75,9 +94,17 @@ export class CompanionProactiveService {
       this.#hydrateRecentHistory(petId, now);
       const activity = this.#orchestrator.activity(petId);
       const listening = this.#listening();
-      const candidates = buildCandidates({ now, dayPart: time.dayPart, localDateKey: time.localDateKey, goals: settings.profile.goals, opportunities: settings.context.pluginEnabled ? this.#opportunities() : [] });
+      const wake = this.#wake();
+      const outputActivity = this.#outputActivity();
+      const candidates = buildCandidates({ now, dayPart: time.dayPart, localDateKey: time.localDateKey, goals: settings.profile.goals, opportunities: settings.context.pluginEnabled ? this.#opportunities() : [], visionOpportunities: this.#visionOpportunities(petId, now) });
       const quiet = isInQuietHours(new Date(now));
-      const interactionActive = activity.thinking || activity.speaking || ["starting", "listening", "stopping", "transcribing"].includes(listening.state);
+      const wakeActive = wake.turnState !== "idle"
+        || ["starting-capture", "starting-helper", "suspended", "recovering-device", "recovering-capture", "recovering-helper", "stopping"].includes(wake.captureState);
+      const interactionActive = activity.thinking
+        || activity.speaking
+        || outputActivity.active
+        || wakeActive
+        || ["starting", "listening", "transcribing"].includes(listening.state);
       const targetHealth = settings.enabled && settings.proactivity.enabled && candidates.length > 0 && !quiet && !interactionActive
         ? await this.#orchestrator.health(settings.target)
         : null;
@@ -91,9 +118,9 @@ export class CompanionProactiveService {
           inQuietHours: quiet,
           targetReady: targetHealth?.ready === true,
           activity: {
-            listening: listening.state === "starting" || listening.state === "listening" || listening.state === "stopping" || listening.state === "transcribing",
+            listening: listening.state === "starting" || listening.state === "listening" || listening.state === "transcribing",
             thinking: activity.thinking,
-            speaking: activity.speaking,
+            speaking: activity.speaking || outputActivity.active || wakeActive,
           },
           candidate: item.candidate,
           history: this.#history,
@@ -108,7 +135,7 @@ export class CompanionProactiveService {
             petId,
             text: item.text,
             speak: false,
-            pluginFacts: item.pluginFact ? [item.pluginFact] : undefined,
+            pluginFactIds: item.pluginFact ? [item.pluginFact.id] : undefined,
             proactive: {
               candidateId: item.candidate.id,
               dedupeKey: item.candidate.dedupeKey,
@@ -180,11 +207,24 @@ function buildCandidates(input: {
   readonly localDateKey: string;
   readonly goals: readonly string[];
   readonly opportunities: readonly CompanionProactiveOpportunity[];
+  readonly visionOpportunities: readonly VisionProactiveOpportunity[];
 }): Array<{ candidate: CompanionProactiveCandidate; text: string; pluginFact?: CompanionPluginFact }> {
   const endOfWindow = input.now + 3 * 60 * 60 * 1_000;
   const candidates: Array<{ candidate: CompanionProactiveCandidate; text: string; pluginFact?: CompanionPluginFact }> = [];
   for (const opportunity of input.opportunities) {
     candidates.push({ candidate: opportunity, text: opportunity.text, pluginFact: opportunity.fact });
+  }
+  for (const opportunity of input.visionOpportunities) {
+    candidates.push({
+      candidate: {
+        id: opportunity.id,
+        dedupeKey: opportunity.dedupeKey,
+        source: "vision",
+        earliestAt: opportunity.createdAt,
+        expiresAt: opportunity.expiresAt,
+      },
+      text: opportunity.text,
+    });
   }
   if (input.goals.length > 0 && (input.dayPart === "midday" || input.dayPart === "afternoon" || input.dayPart === "evening")) {
     const index = stableIndex(input.localDateKey, input.goals.length);

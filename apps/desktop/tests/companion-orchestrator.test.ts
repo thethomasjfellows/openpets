@@ -52,6 +52,7 @@ const target: CompanionTarget = {
   dispose() {},
 };
 const bubbles: string[] = [];
+const bubbleNarrationSuppression: boolean[] = [];
 const speech: string[] = [];
 const output = {
   cancel() {},
@@ -62,7 +63,7 @@ const orchestrator = new CompanionOrchestrator({
   output: output as never,
   getSettings: () => settings,
   getAppState: () => appState as never,
-  showBubble: (_petId, text) => { bubbles.push(text); return true; },
+  showBubble: (_petId, text, options) => { bubbles.push(text); bubbleNarrationSuppression.push(options?.suppressNarration === true); return true; },
   now: () => new Date(2026, 6, 17, 12, 30).getTime(),
 });
 
@@ -71,10 +72,38 @@ assert.equal(result.displayed, true);
 assert.equal(result.spoken, false);
 assert.deepEqual(bubbles, ["Lunch sounds like a good idea, Tom."]);
 assert.deepEqual(speech, []);
+assert.deepEqual(bubbleNarrationSuppression, [false]);
 assert.match(lastPrompt, /Warm, observant, and playfully blunt/);
 assert.match(lastPrompt, /Thomas/);
 assert.match(lastPrompt, /Take a real lunch break/);
 assert.match(lastPrompt, /How are you doing/);
+
+// Contract: a voice conversation has one speech owner. Its visible bubble must
+// not independently auto-narrate the same response and race the explicit TTS.
+bubbles.length = 0;
+speech.length = 0;
+bubbleNarrationSuppression.length = 0;
+const spokenResult = await orchestrator.sendUserTurn({ petId: "pedra", text: "Please answer aloud", kind: "voice", speak: true });
+assert.equal(spokenResult.spoken, true);
+assert.deepEqual(speech, ["Lunch sounds like a good idea, Tom."]);
+assert.deepEqual(bubbleNarrationSuppression, [true]);
+
+// Contract: a removed or unavailable pet window cannot make best-effort voice
+// cancellation break turn startup, cancellation, or orchestrator disposal.
+const unavailableOutput = {
+  cancel() { throw new Error("pet window unavailable"); },
+  speak: async () => ({ ok: true, attempts: [] }),
+};
+const unavailableOutputOrchestrator = new CompanionOrchestrator({
+  targets: [target],
+  output: unavailableOutput as never,
+  getSettings: () => settings,
+  getAppState: () => appState as never,
+  showBubble: () => true,
+});
+assert.equal((await unavailableOutputOrchestrator.sendUserTurn({ petId: "pedra", text: "Keep going", speak: false })).displayed, true);
+assert.doesNotThrow(() => unavailableOutputOrchestrator.cancel("pedra"));
+assert.doesNotThrow(() => unavailableOutputOrchestrator.dispose());
 
 const contextSettings: CompanionSettings = {
   ...settings,
@@ -85,7 +114,10 @@ const controlCenterOnly = new CompanionOrchestrator({
   output: output as never,
   getSettings: () => contextSettings,
   getAppState: () => appState as never,
-  getPluginFacts: () => [{ id: "fact:clock", pluginId: "test.plugin", text: "A deterministic fact.", expiresAt: 124_000 }],
+  getPluginFacts: () => [
+    { id: "fact:clock", pluginId: "test.plugin", sensitivity: "normal", text: "A deterministic fact.", expiresAt: 124_000 },
+    { id: "fact:secret", pluginId: "test.plugin", sensitivity: "sensitive", text: "A sensitive fact.", expiresAt: 124_000 },
+  ],
   showBubble: () => false,
   now: () => 123_000,
 });
@@ -93,6 +125,7 @@ const panelResult = await controlCenterOnly.sendUserTurn({ petId: "pedra", text:
 assert.equal(panelResult.displayed, false);
 assert.ok(panelResult.displayToken);
 assert.match(lastPrompt, /A deterministic fact/, "context expiry uses the same captured clock as the turn");
+assert.doesNotMatch(lastPrompt, /A sensitive fact/, "sensitive plugin context remains excluded without its separate consent");
 assert.equal(controlCenterOnly.acknowledgeDisplay("another-pet", panelResult.displayToken), false);
 assert.equal(controlCenterOnly.acknowledgeDisplay("pedra", panelResult.displayToken), true);
 assert.equal(controlCenterOnly.acknowledgeDisplay("pedra", panelResult.displayToken), false, "display acknowledgements are one-shot");
@@ -252,6 +285,67 @@ proactiveResponse.resolve({ text: "Too late to display." });
 await expiredRejected;
 assert.deepEqual(proactiveBubbles, [], "an expired proactive candidate cannot display its provider result");
 
+let visionOpportunityValid = true;
+const visionResponse = deferred<CompanionTargetResult>();
+const visionStarted = deferred<void>();
+const visionBubbles: string[] = [];
+const visionTarget: CompanionTarget = {
+  id: "codex",
+  health: async () => readyHealth(),
+  send: () => { visionStarted.resolve(undefined); return visionResponse.promise; },
+  dispose() {},
+};
+const visionValidity = new CompanionOrchestrator({
+  targets: [visionTarget],
+  output: output as never,
+  getSettings: () => proactiveSettings,
+  getAppState: () => appState as never,
+  showBubble: (_petId, text) => { visionBubbles.push(text); return true; },
+  now: () => 1_250,
+  isProactiveTurnValid: ({ proactive }) => proactive.source !== "vision" || visionOpportunityValid,
+});
+const invalidatedVisionTurn = visionValidity.sendProactiveTurn({
+  petId: "pedra",
+  text: "Recent screen context",
+  proactive: { candidateId: "vision:1", dedupeKey: "vision:1", source: "vision", expiresAt: 2_500 },
+});
+const invalidatedVisionRejected = rejectsAsAbort(invalidatedVisionTurn);
+await visionStarted.promise;
+visionOpportunityValid = false;
+visionResponse.resolve({ text: "This must not display after Vision is paused." });
+await invalidatedVisionRejected;
+assert.deepEqual(visionBubbles, [], "a paused or disabled Vision opportunity cannot display an in-flight provider result");
+
+let defaultPetContextValid = true;
+const petContextResponse = deferred<CompanionTargetResult>();
+const petContextStarted = deferred<void>();
+const petContextBubbles: string[] = [];
+const petContextValidity = new CompanionOrchestrator({
+  targets: [{
+    id: "codex",
+    health: async () => readyHealth(),
+    send: () => { petContextStarted.resolve(undefined); return petContextResponse.promise; },
+    dispose() {},
+  }],
+  output: output as never,
+  getSettings: () => proactiveSettings,
+  getAppState: () => appState as never,
+  showBubble: (_petId, text) => { petContextBubbles.push(text); return true; },
+  now: () => 1_250,
+  isProactiveTurnValid: () => defaultPetContextValid,
+});
+const hiddenPetTurn = petContextValidity.sendProactiveTurn({
+  petId: "pedra",
+  text: "A gentle goal check-in",
+  proactive: { candidateId: "goal:1", dedupeKey: "goal:1", source: "goal", expiresAt: 2_500 },
+});
+const hiddenPetRejected = rejectsAsAbort(hiddenPetTurn);
+await petContextStarted.promise;
+defaultPetContextValid = false;
+petContextResponse.resolve({ text: "This must not display after the default pet becomes hidden, paused, or changes." });
+await hiddenPetRejected;
+assert.deepEqual(petContextBubbles, [], "all proactive sources revalidate the active default-pet context immediately before display");
+
 proactiveCurrentSettings = { ...proactiveSettings, proactivity: { enabled: false, frequency: "sometimes" } };
 const healthCallsBeforeDisabledRequest = proactiveHealthCalls;
 await assert.rejects(
@@ -360,11 +454,12 @@ const speechRace = new CompanionOrchestrator({
   showBubble: () => true,
 });
 const firstSpokenTurn = speechRace.sendUserTurn({ petId: "pedra", text: "first spoken turn", speak: true });
+const firstSpokenRejected = rejectsAsAbort(firstSpokenTurn);
 await firstSpeechStarted.promise;
 const secondSpokenTurn = speechRace.sendUserTurn({ petId: "pedra", text: "second spoken turn", speak: true });
 await secondSpeechStarted.promise;
 firstSpeech.resolve({ ok: true, attempts: [] });
-assert.equal((await firstSpokenTurn).spoken, false, "a cancelled speech completion is not reported as current");
+await firstSpokenRejected;
 assert.deepEqual(speechRace.activity("pedra"), { thinking: false, speaking: true });
 secondSpeech.resolve({ ok: true, attempts: [] });
 assert.equal((await secondSpokenTurn).spoken, true);
@@ -409,6 +504,7 @@ cancelling.dispose();
 healthRace.dispose();
 healthCancellation.dispose();
 proactiveExpiry.dispose();
+visionValidity.dispose();
 selective.dispose();
 undisplayedProactive.dispose();
 speechRace.dispose();

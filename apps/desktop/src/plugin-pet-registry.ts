@@ -99,14 +99,14 @@ export function resolveInstalledPetVoiceTarget(petId: string): { readonly key: s
   return { key: `${petId}:${spawned.window.id}`, petId, window: spawned.window };
 }
 
-export function showInstalledPetHostBubble(petId: string, text: string): boolean {
+export function showInstalledPetHostBubble(petId: string, text: string, options: { readonly suppressNarration?: boolean; readonly reaction?: OpenPetsReaction; readonly durationMs?: number; readonly voiceIndicator?: "listening" | "speaking"; readonly showCloseButton?: boolean; readonly onDismiss?: () => void } = {}): boolean {
   const state = getAppStateSnapshot();
   if (state.preferences.defaultPetId === petId) {
-    return applyExternalPetSay(text).shown;
+    return applyExternalPetSay(text, options.reaction, options).shown;
   }
   const spawned = [...spawnedPets.values()].find((pet) => pet.petId === petId && pet.window && !pet.window.isDestroyed());
   if (!spawned) return false;
-  spawned.arbiter.show("__openpets-voice-conversation", { text, priority: "high", durationMs: 12_000 }, {
+  spawned.arbiter.show("__openpets-voice-conversation", { text, priority: "high", durationMs: options.durationMs ?? 12_000 }, {
     onAction() {},
     onSubmit() {},
     onDismiss() {},

@@ -1,0 +1,6 @@
+native/target/
+build/
+bundle/
+package-resource/
+training/data/
+training/output/

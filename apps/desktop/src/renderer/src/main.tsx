@@ -40,18 +40,23 @@ type PluginPermission =
   | "pet:interact" | "pet:pin" | "pet:animate" | "pet:speak:dynamic" | "pet:drop" | "pets:read" | "pets:manage"
   | "audio" | "events" | "ui:toast" | "ui:panel" | "ui:delivery" | "notify" | "bus" | "ai" | "secrets" | "voice:speak" | "voice:listen" | "companion:context"
   | "auth" | "files" | "system:openExternal" | "system:metrics" | "clipboard" | "network:write";
+type HostAiProfileId = "anthropic" | "openai" | "openrouter" | "ollama" | "custom";
+type HostAiProviderConfig = { model: string; baseUrl: string; requiresApiKey: boolean };
+type HostAiSettingsSnapshot = { version: 2; provider: "none" | HostAiProfileId; providers: Record<HostAiProfileId, HostAiProviderConfig> };
+type HostAiSecretStatus = Record<HostAiProfileId, { hasKey: boolean }>;
+type HostAiModelCatalog = { provider: HostAiProfileId; models: Array<{ id: string; name: string }> };
 type PluginPlatformSettings = {
   allowPluginAudio: boolean;
   allowDynamicSpeech: boolean;
   allowPluginVoice: boolean;
   allowMicrophone: boolean;
   quietHours: { enabled: boolean; start: string; end: string };
-  ai: { provider: "none" | "anthropic" | "openai" | "ollama"; model: string; baseUrl?: string };
+  ai: HostAiSettingsSnapshot;
 };
 type VoiceProviderId = "system" | "pockettts" | "openai-compatible" | "elevenlabs";
 type VoiceOverlapPolicy = "interrupt" | "queue" | "ignore";
 type VoiceSettingsSnapshot = {
-  version: 1;
+  version: 4;
   output: { providerId: VoiceProviderId; voiceId?: string; model?: string; overlapPolicy: VoiceOverlapPolicy; providerFallback: "system" | "fail"; voiceFallback: "provider-default" | "fail" };
   providers: {
     system: { voiceId?: string; rate: number };
@@ -59,19 +64,35 @@ type VoiceSettingsSnapshot = {
     "openai-compatible": { baseUrl: string; voiceId: string; model: string };
     elevenlabs: { baseUrl: string; voiceId: string; model: string; outputFormat: string };
   };
-  petOverrides: Record<string, { providerId?: VoiceProviderId; voiceId?: string; model?: string; overlapPolicy?: VoiceOverlapPolicy; providerFallback?: "system" | "fail"; voiceFallback?: "provider-default" | "fail" }>;
-  listening: { pushToTalkEnabled: boolean; bargeIn: boolean; timeoutMs: number };
-  wake: { enabled: boolean; phrase: string };
-  conversation: { target: "none" | "codex"; allowStatelessFallback: boolean };
+  wake: { engine: "official-livekit" | "custom-sherpa"; phraseId: "openpets.hey-pedra.v1"; phrase: string; sensitivity: "strict" | "balanced" | "easy"; microphone?: { deviceId: string; label?: string }; calibration?: { phrase: string; variants: readonly string[]; updatedAt: number } };
   installedPets: Array<{ id: string; displayName: string; available: boolean }>;
 };
+type HostAiHealthSnapshot = { status: "unconfigured" | "configured-unverified" | "probing" | "ready" | "error"; configured: boolean; ready: boolean; provider: HostAiSettingsSnapshot["provider"]; model: string; baseUrl?: string; checkedAt?: number; stale: boolean; evidence?: string; error?: string };
+type PocketTtsSnapshot = { enabled: boolean; status: "not-installed" | "uv-missing" | "installing" | "starting" | "warming" | "ready" | "stopped" | "error"; packageVersion: string; baseUrl: string; host: string; port: number; uvCommand?: string; pid?: number; progress?: string; error?: string; voices: VoiceInfo[] };
 type VoiceSecretStatus = { "openai-compatible": { hasKey: boolean }; elevenlabs: { hasKey: boolean } };
 type VoiceCapabilityEvidence = { providerId: VoiceProviderId; checkedAt: number; expiresAt: number; configured: boolean; reachable: boolean; authenticated?: boolean; discoverySupported: boolean; discoveryOk?: boolean; synthesisTested: boolean; ready: boolean; method: string; version?: string; reason?: string };
 type VoiceInfo = { id: string; label: string; language?: string };
 type VoiceSpeakResult = { ok: boolean; attempts: Array<{ providerId: VoiceProviderId; voiceId?: string; started: boolean; fallbackReason?: string; errorType?: string; message?: string }> };
-type VoiceListeningSnapshot = { state: "idle" | "starting" | "listening" | "stopping" | "transcribing" | "complete" | "cancelled" | "error"; owner?: "plugin-listen" | "push-to-talk"; petId?: string; startedAt?: number; transcript?: string; response?: string; displayed?: boolean; displayToken?: string; error?: string };
 type VoiceConversationHealth = { targetId: "codex"; checkedAt: number; ready: boolean; method: string; version?: string; reason?: string };
-type VoiceWakeHealth = { checkedAt: number; ready: false; enabled: false; method: "packaging-gate"; reason: string };
+type VoiceTranscriptionSettings = { version: 2; providerId: "local" | "openai" | "none"; baseUrl: string; model: string };
+type VoiceTranscriptionHealth = { checkedAt: number; configured: boolean; ready: boolean; providerId: VoiceTranscriptionSettings["providerId"]; model: string; baseUrl: string; reason?: string };
+type LocalTranscriptionSnapshot = { status: "not-installed" | "downloading" | "ready" | "error"; modelId: string; modelLabel: string; downloadBytes: number; downloadedBytes: number; storageLocation: string; offlineAfterInstall: true; progress?: string; error?: string };
+type VoiceWakeHealth = { checkedAt: number; ready: boolean; enabled: boolean; method: string; reason?: string };
+type VoiceWakeSnapshot = { checkedAt: number; enabled: boolean; armed: boolean; captureState: string; turnState: string; phraseConfigured: boolean; activePetId?: string; reason?: string; diagnostics?: { captureStartedAt?: number; helperStartedAt?: number; lastPcmFrameAt?: number; pcmFramesReceived: number; lastPcmRms?: number; lastHelperEventAt?: number; lastKeywordAt?: number; lastVadAt?: number; lastVadState?: "speech-start" | "speech-end"; lastFinalizedUtteranceMs?: number; lastTranscriptionAt?: number; lastCompanionTurnAt?: number; lastError?: string; lastFailureStage?: "transcription" | "companion" } };
+type VoiceWakeCalibrationSnapshot = { state: "idle" | "preparing" | "listening" | "transcribing" | "review" | "saving" | "complete" | "error"; phrase: string; completedSamples: number; requiredSamples: 10; attempts: number; maximumAttempts: 40; detectedSamples: number; calibrated: boolean; batchInterpretations?: readonly string[]; savedInterpretations?: readonly string[]; activeRuntimeInterpretations?: readonly string[]; lastPcmRms?: number; lastPcmFrameAt?: number; skippedInterpretations?: number; reason?: string };
+type VoiceMicrophoneDevice = { deviceId: string; label: string; stableLabel?: string };
+type VisionSnapshot = {
+  version: 1;
+  enabled: boolean;
+  pausedUntil?: number;
+  state: "off" | "paused" | "checking" | "ready" | "capturing" | "summarizing" | "blocked" | "error";
+  storage: { dir: string; entries: number; screenshotsBytes: number; oldestAt?: number; newestAt?: number; lastPurgeAt?: number; deleteError: boolean; persisted: boolean };
+  capture: { ready: boolean; status: "unknown" | "ready" | "permission-denied" | "unavailable" | "error"; checkedAt?: number; reason?: string };
+  summary: { ready: boolean; status: "unconfigured" | "configured-unverified" | "probing" | "ready" | "unsupported" | "error"; provider: "none" | HostAiProfileId | "codex"; model: string; checkedAt?: number; reason?: string };
+  lastCaptureAt?: number;
+  lastSummaryAt?: number;
+  nextCaptureAt?: number;
+};
 type CompanionFrequency = "rarely" | "sometimes" | "often";
 type CompanionTargetId = "codex" | "host-ai";
 type CompanionSettings = {
@@ -79,15 +100,20 @@ type CompanionSettings = {
   consentVersion: 0 | 1;
   enabled: boolean;
   target: CompanionTargetId;
+  codex: { model: string; reasoningEffort: string };
   profile: { name: string; preferredAddress: string; goals: readonly string[] };
   pets: Readonly<Record<string, { personality: string }>>;
   memory: { enabled: boolean };
   proactivity: { enabled: boolean; frequency: CompanionFrequency };
   context: { pluginEnabled: boolean; sensitivePluginEnabled: boolean; screenEnabled: boolean };
-  wake: { enabled: boolean };
+  wake: { enabled: boolean; followUpEnabled: boolean };
 };
 type CompanionTargetHealth = { targetId: CompanionTargetId; checkedAt: number; configured: boolean; ready: boolean; method: string; provider?: string; model?: string; version?: string; reason?: string };
-type CompanionTurnResult = { petId: string; text: string; targetId: CompanionTargetId; displayed: boolean; spoken: boolean; displayToken?: string };
+type CodexModelInfo = { id: string; model: string; displayName: string; description: string; hidden: boolean; isDefault: boolean; inputModalities: string[]; defaultReasoningEffort: string; supportedReasoningEfforts: Array<{ value: string; description: string }> };
+type CodexModelDiscoverySnapshot = { checkedAt: number; status: "ready" | "not_detected" | "unsupported" | "error"; models: CodexModelInfo[]; defaultModelId?: string; reason?: string };
+type DesktopPermissionKind = "microphone" | "screen-recording";
+type DesktopPermissionStatus = "granted" | "denied" | "restricted" | "not-determined" | "unknown" | "unsupported";
+type DesktopPermissionSnapshot = { platform: string; appLocation: "applications" | "development" | "other"; permissions: Record<DesktopPermissionKind, { status: DesktopPermissionStatus; canRequest: boolean; canOpenSettings: boolean; requiresRestartAfterGrant: boolean }> };
 type PluginInspectorState = { schedules: Array<{ id: string; type: string; nextRunMs: number }>; commands: PluginCommand[]; menuItems: Array<{ id: string; title: string }>; status?: PluginStatus; activeBubbles: number; activePanels: number; eventSubscriptions: number; lastError?: string; quotaCounters: Record<string, number> };
 type PluginIconName = "plugin" | "bell" | "timer" | "github" | "heart" | "sparkles" | "coffee" | "focus" | "droplet";
 type PluginConfigField = { type: "text" | "textarea" | "number" | "boolean" | "select" | "time" | "date" | "multiSelect" | "list" | "secret" | "sound"; label?: string; description?: string; default?: string | number | boolean | string[] | Array<Record<string, unknown>>; options?: Array<{ label: string; value: string; previewSprite?: string }>; presentation?: "sprite-grid" | string; min?: number; max?: number; step?: number; maxLength?: number; maxItems?: number; itemSchema?: Record<string, PluginConfigField> };
@@ -137,9 +163,24 @@ type ControlCenterApi = {
   getPluginInspector(id: string): Promise<PluginInspectorState>;
   getPluginPlatformSettings(): Promise<PluginPlatformSettings>;
   updatePluginPlatformSettings(patch: Partial<PluginPlatformSettings>): Promise<PluginPlatformSettings>;
-  setPluginAiApiKey(key: string | null): Promise<{ ok: boolean; hasKey: boolean }>;
-  getPluginAiApiKeyStatus(): Promise<{ hasKey: boolean }>;
+  getHostAiSettings(): Promise<HostAiSettingsSnapshot>;
+  updateHostAiProvider(provider: HostAiProfileId, patch: Partial<HostAiProviderConfig>): Promise<HostAiSettingsSnapshot>;
+  selectHostAiProvider(provider: HostAiProfileId): Promise<HostAiSettingsSnapshot>;
+  getHostAiApiKeyStatus(): Promise<HostAiSecretStatus>;
+  setHostAiApiKey(provider: HostAiProfileId, key: string | null): Promise<{ provider: HostAiProfileId; hasKey: boolean }>;
+  getHostAiHealth(provider: HostAiProfileId, force?: boolean): Promise<HostAiHealthSnapshot>;
+  getHostAiModels(provider: HostAiProfileId): Promise<HostAiModelCatalog>;
   getVoiceSettings(): Promise<VoiceSettingsSnapshot>;
+  getVoiceTranscriptionSettings(): Promise<VoiceTranscriptionSettings>;
+  updateVoiceTranscriptionSettings(patch: Partial<VoiceTranscriptionSettings>): Promise<VoiceTranscriptionSettings>;
+  getVoiceTranscriptionHealth(): Promise<VoiceTranscriptionHealth>;
+  getLocalTranscriptionSnapshot(): Promise<LocalTranscriptionSnapshot>;
+  installLocalTranscription(): Promise<LocalTranscriptionSnapshot>;
+  getPocketTtsSnapshot(): Promise<PocketTtsSnapshot>;
+  installAndEnablePocketTts(): Promise<PocketTtsSnapshot>;
+  startPocketTts(): Promise<PocketTtsSnapshot>;
+  stopPocketTts(): Promise<PocketTtsSnapshot>;
+  getPocketTtsVoices(): Promise<VoiceInfo[]>;
   updateVoiceSettings(patch: Record<string, unknown>): Promise<VoiceSettingsSnapshot>;
   getVoiceSecretStatus(): Promise<VoiceSecretStatus>;
   setVoiceSecret(providerId: "openai-compatible" | "elevenlabs", key: string | null): Promise<VoiceSecretStatus>;
@@ -147,12 +188,19 @@ type ControlCenterApi = {
   discoverVoiceProviderVoices(providerId: VoiceProviderId): Promise<{ supported: boolean; voices: VoiceInfo[]; evidence: VoiceCapabilityEvidence }>;
   testVoiceSpeech(request: { text: string; providerId?: VoiceProviderId; voiceId?: string; model?: string; petId?: string }): Promise<VoiceSpeakResult>;
   stopVoiceSpeech(petId?: string): Promise<{ ok: boolean }>;
-  getVoiceListeningState(): Promise<VoiceListeningSnapshot>;
   getVoiceConversationHealth(force?: boolean): Promise<VoiceConversationHealth>;
   getVoiceWakeHealth(): Promise<VoiceWakeHealth>;
-  startVoicePushToTalk(petId: string): Promise<VoiceListeningSnapshot>;
-  stopVoicePushToTalk(): Promise<VoiceListeningSnapshot>;
-  cancelVoiceActivity(): Promise<VoiceListeningSnapshot>;
+  getVoiceWakeSnapshot(): Promise<VoiceWakeSnapshot>;
+  getVoiceWakeCalibrationSnapshot(): Promise<VoiceWakeCalibrationSnapshot>;
+  startVoiceWakeCalibration(phrase: string): Promise<VoiceWakeCalibrationSnapshot>;
+  cancelVoiceWakeCalibration(): Promise<VoiceWakeCalibrationSnapshot>;
+  saveVoiceWakeCalibration(): Promise<VoiceWakeCalibrationSnapshot>;
+  deleteVoiceWakeCalibrationInterpretation(value: string): Promise<VoiceWakeCalibrationSnapshot>;
+  resetVoiceWakeCalibration(): Promise<VoiceWakeCalibrationSnapshot>;
+  getVisionSnapshot(forceHealth?: boolean): Promise<VisionSnapshot>;
+  setVisionEnabled(enabled: boolean): Promise<VisionSnapshot>;
+  pauseVision(minutes: 30 | 60 | 90): Promise<VisionSnapshot>;
+  resumeVision(): Promise<VisionSnapshot>;
   getCompanionSettings(): Promise<CompanionSettings>;
   enableCompanion(): Promise<CompanionSettings>;
   disableCompanion(): Promise<CompanionSettings>;
@@ -160,9 +208,11 @@ type ControlCenterApi = {
   updateCompanionPetSettings(petId: string, patch: { personality?: string }): Promise<CompanionSettings>;
   clearCompanionMemory(petId?: string): Promise<{ ok: true }>;
   getCompanionTargetHealth(targetId?: CompanionTargetId, force?: boolean): Promise<CompanionTargetHealth>;
-  sendCompanionMessage(request: { petId: string; text: string; speak?: boolean }): Promise<CompanionTurnResult>;
-  cancelCompanionTurn(petId: string): Promise<{ ok: true }>;
-  acknowledgeCompanionDisplay(petId: string, token: string): Promise<{ ok: boolean }>;
+  getCodexModels(force?: boolean): Promise<CodexModelDiscoverySnapshot>;
+  getDesktopPermissions(): Promise<DesktopPermissionSnapshot>;
+  requestDesktopPermission(kind: DesktopPermissionKind): Promise<DesktopPermissionSnapshot>;
+  openDesktopPermissionSettings(kind: DesktopPermissionKind): Promise<DesktopPermissionSnapshot>;
+  restartForDesktopPermissions(): Promise<void>;
   getCatalog(): Promise<CatalogState>;
   getCatalogPage(page: number): Promise<CatalogState>;
   getCatalogSearch(): Promise<{ pets: SearchPetEntry[]; error?: string }>;
@@ -180,6 +230,7 @@ type ControlCenterApi = {
   launchCodexHookReview(): Promise<{ ok: boolean; message: string }>;
   completeCodexHookReview(): Promise<{ ok: boolean }>;
   updateIntegrationCommandPaths(patch: Partial<AgentSetupCommandPaths>): Promise<AgentSetupCommandPaths>;
+  updateCodexReactionPreferences(patch: Partial<CodexReactionPreferences>): Promise<AgentSetupSnapshot>;
 };
 
 
@@ -193,13 +244,22 @@ type OpenCodeSetupPreview = { global: true; configDir: string; configPath: strin
 type CursorSetupStatus = { state: "configured" | "needs_setup" | "not_detected" | "error" | "conflict" | "needs_update"; label: string; details: string; configPath: string; canInstall: boolean; canReplace: boolean; canRemove: boolean };
 type CursorSetupPreview = { global: true; configPath: string; mcpEntry: Record<string, unknown>; rulesPath: string; rulesContent: string; commandMode: "published" | "local" | "bundled" };
 type CodexIntegrationState = "not_detected" | "installable" | "installing" | "waiting_for_trust" | "connected" | "needs_repair" | "conflict" | "unsupported";
-type CodexIntegrationSnapshot = { state: CodexIntegrationState; message: string; detected: boolean; command: string; version?: string; location?: string; supported: boolean; hooks: { state: string; trust: "missing" | "waiting" | "trusted" | "modified" | "unsupported"; path: string; installedEvents: string[] }; mcp: { state: string; serverName: "openpets"; command?: string; args?: string[] }; legacy: { detected: boolean; removable: boolean; details: string[] }; managedChanges: Array<{ id: string; path: string; title: string; detail: string; ownership: "managed" | "read_only" | "legacy"; present: boolean }>; canInstall: boolean; canRepair: boolean; canDisconnect: boolean; canRefresh: true };
+type CodexIntegrationSnapshot = { state: CodexIntegrationState; message: string; detected: boolean; command: string; version?: string; location?: string; supported: boolean; hooks: { state: string; trust: "missing" | "waiting" | "trusted" | "modified" | "unsupported"; path: string; installedEvents: string[]; changedEvents?: string[] }; mcp: { state: string; serverName: "openpets"; command?: string; args?: string[]; message?: string }; legacy: { detected: boolean; removable: boolean; details: string[] }; checks: Array<{ id: "cli" | "version" | "hooks" | "hook-trust" | "mcp" | "legacy"; state: "ok" | "needs_action" | "waiting" | "conflict" | "unsupported" | "error"; message: string; detail?: string }>; managedChanges: Array<{ id: string; path: string; title: string; detail: string; ownership: "managed" | "read_only" | "legacy"; present: boolean }>; canInstall: boolean; canRepair: boolean; canDisconnect: boolean; canRefresh: true };
+type CodexReactionPreferences = { taskStarted: boolean; taskWorking: boolean; taskCompleted: boolean };
 type AgentSetupCommandPaths = { claude: string; codex: string; node: string; opencode: string };
 type AgentSetupActionResult = { ok: boolean; action: AgentSetupAction; message: string; changed: boolean };
-type AgentSetupSnapshot = { selectedPetId?: string; commandMode: "published" | "local" | "bundled"; localDevAvailable: boolean; petOptions: AgentSetupPetOption[]; preview: { displayCommand: string; mcpJson: Record<string, unknown> }; status: ClaudeCodeStatus; hookStatus: ClaudeHookDoctorResult; memoryStatus: ClaudeOpenPetsMemoryStatus; opencodeStatus: OpenCodeSetupStatus; opencodePreview: OpenCodeSetupPreview; cursorStatus: CursorSetupStatus; cursorPreview: CursorSetupPreview; codexStatus: CodexIntegrationSnapshot; codexLastEvent?: { lifecycle: string; occurredAt: number; receivedAt: number }; commandPaths: AgentSetupCommandPaths; busy: boolean; lastAction?: AgentSetupActionResult };
+type AgentSetupSnapshot = { selectedPetId?: string; commandMode: "published" | "local" | "bundled"; localDevAvailable: boolean; petOptions: AgentSetupPetOption[]; preview: { displayCommand: string; mcpJson: Record<string, unknown> }; status: ClaudeCodeStatus; hookStatus: ClaudeHookDoctorResult; memoryStatus: ClaudeOpenPetsMemoryStatus; opencodeStatus: OpenCodeSetupStatus; opencodePreview: OpenCodeSetupPreview; cursorStatus: CursorSetupStatus; cursorPreview: CursorSetupPreview; codexStatus: CodexIntegrationSnapshot; codexLastEvent?: { lifecycle: string; occurredAt: number; receivedAt: number }; codexReactionPreferences: CodexReactionPreferences; commandPaths: AgentSetupCommandPaths; busy: boolean; lastAction?: AgentSetupActionResult };
 type StatusTone = keyof typeof statusPillToneClass;
 
 const api = (window as unknown as { openPetsControlCenter: ControlCenterApi }).openPetsControlCenter;
+
+function userFacingError(error: unknown): string {
+  const raw = String((error as Error)?.message ?? error);
+  return raw
+    .replace(/^Error invoking remote method '[^']+':\s*/i, "")
+    .replace(/^Error:\s*/i, "")
+    .trim() || "OpenPets could not complete that action.";
+}
 
 
 // Inline SVG Icons for actions, pagination, and filters
@@ -1130,34 +1190,34 @@ function ReactionPreviewSprite({ settings, state }: { settings: ReactionAnimatio
   );
 }
 
-function SettingsView() {
+function SettingsView({ onNavigate }: { onNavigate: (route: Route) => void }) {
   const { t, localePreference, availableLocales, reload: reloadI18n } = useI18n();
   const [settings, setSettings] = useState<SettingsState | null>(null);
   const [reactionSettings, setReactionSettings] = useState<ReactionAnimationSettings | null>(null);
   const [launchAtLogin, setLaunchAtLogin] = useState<LaunchAtLoginState | null>(null);
   const [lanStatus, setLanStatus] = useState<LanStatusSnapshot | null>(null);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
-  const [activeTab, setActiveTab] = useState<"general" | "reactions" | "plugins" | "lan" | "voice">("general");
+  const [activeTab, setActiveTab] = useState<"general" | "reactions" | "plugins" | "lan" | "listen" | "speak" | "vision" | "ai-brain">("general");
   const [pluginsSnapshot, setPluginsSnapshot] = useState<PluginServiceSnapshot | null>(null);
   const [platformSettings, setPlatformSettings] = useState<PluginPlatformSettings | null>(null);
-  const [aiKeyStatus, setAiKeyStatus] = useState<{ hasKey: boolean }>({ hasKey: false });
-  const [aiKeyDraft, setAiKeyDraft] = useState("");
+  const [hostAiSettings, setHostAiSettings] = useState<HostAiSettingsSnapshot | null>(null);
   const [voiceSettings, setVoiceSettings] = useState<VoiceSettingsSnapshot | null>(null);
   const [voiceSecrets, setVoiceSecrets] = useState<VoiceSecretStatus>({ "openai-compatible": { hasKey: false }, elevenlabs: { hasKey: false } });
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const reactionSaveQueue = useRef(Promise.resolve());
+  const settingsContentRef = useRef<HTMLElement | null>(null);
 
   async function loadSettings() {
     setError("");
-    const [nextSettings, nextReactions, nextLaunch, nextUpdate, nextPlatform, nextAiKey, nextLanStatus, nextPluginsSnapshot, nextVoiceSettings, nextVoiceSecrets] = await Promise.all([
+    const [nextSettings, nextReactions, nextLaunch, nextUpdate, nextPlatform, nextAiSettings, nextLanStatus, nextPluginsSnapshot, nextVoiceSettings, nextVoiceSecrets] = await Promise.all([
       api.getSettingsState(),
       api.getReactionAnimationSettings(),
       api.getLaunchAtLogin(),
       api.getUpdateStatus(),
       api.getPluginPlatformSettings().catch(() => null),
-      api.getPluginAiApiKeyStatus().catch(() => ({ hasKey: false })),
+      api.getHostAiSettings().catch(() => null),
       api.getLanStatus().catch(() => null),
       api.getPluginsSnapshot().catch(() => null),
       api.getVoiceSettings().catch(() => null),
@@ -1168,7 +1228,7 @@ function SettingsView() {
     setLaunchAtLogin(nextLaunch);
     setUpdateStatus(nextUpdate);
     setPlatformSettings(nextPlatform);
-    setAiKeyStatus(nextAiKey);
+    setHostAiSettings(nextAiSettings);
     setLanStatus(nextLanStatus);
     setPluginsSnapshot(nextPluginsSnapshot);
     setVoiceSettings(nextVoiceSettings);
@@ -1179,6 +1239,10 @@ function SettingsView() {
   }
 
   useEffect(() => { void loadSettings().catch((err) => setError(String(err?.message ?? err))); }, []);
+
+  useEffect(() => {
+    settingsContentRef.current?.scrollTo({ top: 0 });
+  }, [activeTab]);
 
   useEffect(() => api.onPluginsRefresh(() => {
     void api.getPluginsSnapshot().then(setPluginsSnapshot).catch((err) => setError(String(err?.message ?? err)));
@@ -1192,7 +1256,7 @@ function SettingsView() {
 
   async function run(label: string, fn: () => Promise<void>) {
     try { setBusy(label); setError(""); setMessage(""); await fn(); }
-    catch (err) { setError(String((err as Error)?.message ?? err)); }
+    catch (err) { setError(userFacingError(err)); }
     finally { setBusy(""); }
   }
 
@@ -1272,6 +1336,22 @@ function SettingsView() {
           <PetsIcon />
           <span>{t("settings.nav.reactions")}</span>
         </button>
+        <button className={`settings-nav-item ${activeTab === "ai-brain" ? "active" : ""}`} onClick={() => setActiveTab("ai-brain")}>
+          <SettingsIcon />
+          <span>{t("settings.nav.aiBrain")}</span>
+        </button>
+        <button className={`settings-nav-item ${activeTab === "listen" ? "active" : ""}`} onClick={() => setActiveTab("listen")}>
+          <VolumeIcon />
+          <span>{t("settings.nav.listen")}</span>
+        </button>
+        <button className={`settings-nav-item ${activeTab === "speak" ? "active" : ""}`} onClick={() => setActiveTab("speak")}>
+          <VolumeIcon />
+          <span>{t("settings.nav.speak")}</span>
+        </button>
+        <button className={`settings-nav-item ${activeTab === "vision" ? "active" : ""}`} onClick={() => setActiveTab("vision")}>
+          <IntegrationsIcon />
+          <span>{t("settings.nav.vision")}</span>
+        </button>
         <button className={`settings-nav-item ${activeTab === "plugins" ? "active" : ""}`} onClick={() => setActiveTab("plugins")}>
           <PluginsIcon />
           <span>{t("settings.nav.plugins")}</span>
@@ -1280,13 +1360,9 @@ function SettingsView() {
           <IntegrationsIcon />
           <span>{t("settings.nav.lan")}</span>
         </button>
-        <button className={`settings-nav-item ${activeTab === "voice" ? "active" : ""}`} onClick={() => setActiveTab("voice")}>
-          <VolumeIcon />
-          <span>{t("settings.nav.voice")}</span>
-        </button>
       </aside>
 
-      <main className="settings-content">
+      <main className="settings-content" ref={settingsContentRef}>
         {activeTab === "general" && (
           <>
             <div className="settings-section">
@@ -1468,13 +1544,25 @@ function SettingsView() {
           <LanSettingsPanel status={lanStatus} onRefresh={() => void run(t("settings.busy.checking"), async () => { setLanStatus(await api.getLanStatus()); })} busy={!!busy} />
         )}
 
-        {activeTab === "voice" && (
-          <VoiceSettingsPanel
+        {(activeTab === "listen" || activeTab === "speak" || activeTab === "vision") && (
+          <AbilitiesSettingsPanel
+            section={activeTab}
             settings={voiceSettings}
             secrets={voiceSecrets}
             busy={!!busy}
             onSettings={setVoiceSettings}
             onSecrets={setVoiceSecrets}
+            run={run}
+            setMessage={setMessage}
+          />
+        )}
+
+        {activeTab === "ai-brain" && (
+          <AiBrainSettingsPanel
+            settings={hostAiSettings}
+            busy={!!busy}
+            onSettings={setHostAiSettings}
+            onNavigate={onNavigate}
             run={run}
             setMessage={setMessage}
           />
@@ -1538,38 +1626,6 @@ function SettingsView() {
               </div>
             </div>
 
-            <div className="settings-group">
-              <div className="settings-row">
-                <div className="settings-row-info">
-                  <strong>{t("settings.plugins.aiProvider.title")}</strong>
-                  <small>{t("settings.plugins.aiProvider.description")}</small>
-                </div>
-                <select className="settings-select" value={platformSettings?.ai.provider ?? "none"} disabled={!platformSettings || !!busy} onChange={(event) => patchPlatformSettings({ ai: { ...(platformSettings?.ai ?? { model: "" }), provider: event.target.value as PluginPlatformSettings["ai"]["provider"] } }, t("settings.toast.aiProviderSaved"))}>
-                  <option value="none">{t("settings.plugins.aiProvider.disabled")}</option>
-                  <option value="anthropic">{t("settings.plugins.aiProvider.anthropic")}</option>
-                  <option value="openai">{t("settings.plugins.aiProvider.openai")}</option>
-                  <option value="ollama">{t("settings.plugins.aiProvider.ollama")}</option>
-                </select>
-              </div>
-              <div className="settings-row">
-                <div className="settings-row-info">
-                  <strong>{t("settings.plugins.model.title")}</strong>
-                  <small>{t("settings.plugins.model.description")}</small>
-                </div>
-                <input type="text" className="settings-select" placeholder={t("settings.plugins.model.placeholder")} defaultValue={platformSettings?.ai.model ?? ""} disabled={!platformSettings || !!busy} onBlur={(event) => { if (event.target.value !== (platformSettings?.ai.model ?? "")) patchPlatformSettings({ ai: { ...(platformSettings?.ai ?? { provider: "none" }), model: event.target.value } as PluginPlatformSettings["ai"] }, t("settings.toast.aiModelSaved")); }} />
-              </div>
-              <div className="settings-row">
-                <div className="settings-row-info">
-                  <strong>{t("settings.plugins.apiKey.title")}</strong>
-                  <small>{aiKeyStatus.hasKey ? t("settings.plugins.apiKey.stored") : t("settings.plugins.apiKey.none")}</small>
-                </div>
-                <div className="flex gap-2 items-center">
-                  <input type="password" className="settings-select" placeholder={aiKeyStatus.hasKey ? t("settings.plugins.apiKey.placeholderStored") : t("settings.plugins.apiKey.placeholderEmpty")} value={aiKeyDraft} disabled={!!busy} onChange={(event) => setAiKeyDraft(event.target.value)} />
-                  <Button variant="secondary" size="compact" disabled={!!busy || !aiKeyDraft} onClick={() => void run(t("settings.busy.saving"), async () => { setAiKeyStatus(await api.setPluginAiApiKey(aiKeyDraft)); setAiKeyDraft(""); setMessage(t("settings.toast.aiKeySaved")); })}>{t("settings.plugins.apiKey.save")}</Button>
-                  {aiKeyStatus.hasKey && <Button variant="secondary" size="compact" disabled={!!busy} onClick={() => void run(t("settings.busy.saving"), async () => { setAiKeyStatus(await api.setPluginAiApiKey(null)); setMessage(t("settings.toast.aiKeyRemoved")); })}>{t("settings.plugins.apiKey.remove")}</Button>}
-                </div>
-              </div>
-            </div>
           </div>
         )}
       </main>
@@ -1577,7 +1633,171 @@ function SettingsView() {
   </div>;
 }
 
-function VoiceSettingsPanel({ settings, secrets, busy, onSettings, onSecrets, run, setMessage }: {
+function AiBrainSettingsPanel({ settings, busy, onSettings, onNavigate, run, setMessage }: {
+  settings: HostAiSettingsSnapshot | null;
+  busy: boolean;
+  onSettings: (settings: HostAiSettingsSnapshot) => void;
+  onNavigate: (route: Route) => void;
+  run: (label: string, fn: () => Promise<void>) => Promise<void>;
+  setMessage: (message: string) => void;
+}) {
+  const { t } = useI18n();
+  const [companion, setCompanion] = useState<CompanionSettings | null>(null);
+  const [codexHealth, setCodexHealth] = useState<CompanionTargetHealth | null>(null);
+  const [codexModels, setCodexModels] = useState<CodexModelDiscoverySnapshot | null>(null);
+  const [health, setHealth] = useState<Partial<Record<HostAiProfileId, HostAiHealthSnapshot>>>({});
+  const [secrets, setSecrets] = useState<HostAiSecretStatus>({ anthropic: { hasKey: false }, openai: { hasKey: false }, openrouter: { hasKey: false }, ollama: { hasKey: false }, custom: { hasKey: false } });
+  const [keyDrafts, setKeyDrafts] = useState<Partial<Record<HostAiProfileId, string>>>({});
+  const [modelCatalogs, setModelCatalogs] = useState<Partial<Record<HostAiProfileId, HostAiModelCatalog>>>({});
+
+  const refresh = async (force = false) => {
+    const [nextCompanion, nextModels, nextSecrets, nextSettings] = await Promise.all([
+      api.getCompanionSettings(),
+      api.getCodexModels(force).catch((error: unknown) => ({ checkedAt: Date.now(), status: "error" as const, models: [], reason: userFacingError(error) })),
+      api.getHostAiApiKeyStatus(),
+      api.getHostAiSettings(),
+    ]);
+    setCompanion(nextCompanion);
+    setCodexModels(nextModels);
+    setSecrets(nextSecrets);
+    onSettings(nextSettings);
+    setCodexHealth(await api.getCompanionTargetHealth("codex", force).catch(() => null));
+    if (nextCompanion.target === "host-ai" && nextSettings.provider !== "none") {
+      const activeHealth = await api.getHostAiHealth(nextSettings.provider, force).catch(() => null);
+      if (activeHealth) setHealth((current) => ({ ...current, [nextSettings.provider]: activeHealth }));
+    }
+  };
+
+  useEffect(() => { void refresh(false); }, []);
+
+  const selectCodex = () => void run(t("settings.busy.saving"), async () => {
+    const next = await api.updateCompanionSettings({ target: "codex" });
+    setCompanion(next);
+    setCodexHealth(await api.getCompanionTargetHealth("codex", true).catch(() => null));
+    setMessage(t("settings.aiBrain.selected", { provider: t("settings.aiBrain.codex") }));
+  });
+
+  const selectProvider = (provider: HostAiProfileId) => void run(t("settings.busy.saving"), async () => {
+    onSettings(await api.selectHostAiProvider(provider));
+    setCompanion(await api.updateCompanionSettings({ target: "host-ai" }));
+    setMessage(t("settings.aiBrain.selected", { provider: t(`settings.aiBrain.provider.${provider}`) }));
+  });
+
+  const saveProvider = (provider: HostAiProfileId, patch: Partial<HostAiProviderConfig>) => void run(t("settings.busy.saving"), async () => {
+    onSettings(await api.updateHostAiProvider(provider, patch));
+    setHealth((current) => ({ ...current, [provider]: undefined }));
+    setMessage(t("settings.aiBrain.providerSaved", { provider: t(`settings.aiBrain.provider.${provider}`) }));
+  });
+
+  const setProviderKey = (provider: HostAiProfileId, key: string | null) => void run(t("settings.busy.saving"), async () => {
+    const next = await api.setHostAiApiKey(provider, key);
+    setSecrets((current) => ({ ...current, [provider]: { hasKey: next.hasKey } }));
+    setKeyDrafts((current) => ({ ...current, [provider]: "" }));
+    setHealth((current) => ({ ...current, [provider]: undefined }));
+    setMessage(key ? t("settings.toast.aiKeySaved") : t("settings.toast.aiKeyRemoved"));
+  });
+
+  const checkProvider = (provider: HostAiProfileId) => void run(t("settings.busy.checking"), async () => {
+    const next = await api.getHostAiHealth(provider, true);
+    setHealth((current) => ({ ...current, [provider]: next }));
+  });
+
+  const loadProviderModels = (provider: HostAiProfileId) => void run(t("settings.aiBrain.loadingModels"), async () => {
+    const catalog = await api.getHostAiModels(provider);
+    setModelCatalogs((current) => ({ ...current, [provider]: catalog }));
+    setMessage(t("settings.aiBrain.modelsLoaded", { count: catalog.models.length }));
+  });
+
+  const defaultCodexModel = codexModels?.models.find((model) => model.isDefault)
+    ?? codexModels?.models.find((model) => model.id === codexModels.defaultModelId)
+    ?? codexModels?.models[0];
+  const selectedCodexModel = companion?.codex.model
+    ? codexModels?.models.find((model) => model.id === companion.codex.model || model.model === companion.codex.model)
+    : defaultCodexModel;
+  const codexModelOptions = [
+    { value: "", label: defaultCodexModel ? `Use Codex default (${defaultCodexModel.displayName})` : "Use Codex default" },
+    ...(codexModels?.models ?? []).map((model) => ({ value: model.model, label: `${model.displayName}${model.inputModalities.includes("image") ? " · Vision" : " · Text only"}` })),
+  ];
+  const reasoningOptions = [
+    { value: "", label: selectedCodexModel?.defaultReasoningEffort ? `Use model default (${selectedCodexModel.defaultReasoningEffort})` : "Use model default" },
+    ...(selectedCodexModel?.supportedReasoningEfforts ?? []).map((effort) => ({ value: effort.value, label: effort.value.charAt(0).toUpperCase() + effort.value.slice(1) })),
+  ];
+  const saveCodex = (codex: { model?: string; reasoningEffort?: string }) => void run(t("settings.busy.saving"), async () => {
+    setCompanion(await api.updateCompanionSettings({ codex }));
+    setCodexHealth(null);
+    setMessage(t("settings.aiBrain.saved"));
+  });
+
+  const providerIds: HostAiProfileId[] = ["anthropic", "openai", "openrouter", "ollama", "custom"];
+  const activeBrain = companion?.target === "codex" ? "codex" : settings?.provider ?? "none";
+  const activeHostHealth = activeBrain !== "codex" && activeBrain !== "none" ? health[activeBrain] : null;
+  return <div className="settings-section">
+    <p className="eyebrow">{t("settings.aiBrain.eyebrow")}</p>
+    <h2 className="settings-section-title">{t("settings.aiBrain.title")}</h2>
+    <p className="text-sm text-slatecopy -mt-2 mb-2">{t("settings.aiBrain.cardsDescription")}</p>
+
+    <div className="settings-group ai-brain-selector-card">
+      <VoiceSelectRow
+        title={t("settings.aiBrain.activeSelector")}
+        description={t("settings.aiBrain.activeSelectorDescription")}
+        value={activeBrain}
+        disabled={busy || !companion || !settings}
+        onChange={(value) => value === "codex" ? selectCodex() : selectProvider(value as HostAiProfileId)}
+        options={[
+          { value: "none", label: t("settings.aiBrain.chooseProvider"), disabled: true },
+          { value: "codex", label: t("settings.aiBrain.codex") },
+          ...providerIds.map((provider) => ({ value: provider, label: t(`settings.aiBrain.provider.${provider}`) })),
+        ]}
+      />
+      <div className="settings-row"><div className="settings-row-info"><strong>{t("settings.aiBrain.status")}</strong><small>{activeBrain === "none" ? t("settings.aiBrain.chooseProvider") : activeBrain === "codex" ? codexHealth?.reason ?? (codexHealth?.ready ? t("settings.aiBrain.ready") : t("settings.aiBrain.notChecked")) : activeHostHealth?.error ?? (activeHostHealth?.ready ? `${activeHostHealth.model} · ${activeHostHealth.baseUrl ?? ""}` : t("settings.aiBrain.checkCardBelow"))}</small></div><span className={(activeBrain === "codex" ? codexHealth?.ready : activeHostHealth?.ready) ? "pill pill-green" : "pill pill-orange"}>{(activeBrain === "codex" ? codexHealth?.ready : activeHostHealth?.ready) ? t("settings.aiBrain.ready") : t("settings.aiBrain.needsAttention")}</span></div>
+    </div>
+
+    <div className={`settings-group ai-provider-card ${companion?.target === "codex" ? "ai-provider-card-active" : ""}`}>
+      <div className="settings-row ai-provider-card-header">
+        <div className="settings-row-info"><strong>{t("settings.aiBrain.codex")}</strong><small>{t("settings.aiBrain.codexCardDescription")}</small></div>
+        <span className={companion?.target === "codex" ? "pill pill-green" : "pill pill-slate"}>{companion?.target === "codex" ? t("settings.aiBrain.active") : t("settings.aiBrain.configuredHere")}</span>
+      </div>
+      <VoiceSelectRow title={t("settings.aiBrain.codexModel")} description={selectedCodexModel?.description || t("settings.aiBrain.codexModelDescription")} value={companion?.codex.model ? selectedCodexModel?.model ?? companion.codex.model : ""} disabled={busy || codexModels?.status !== "ready" || !companion} onChange={(value) => saveCodex({ model: value, reasoningEffort: "" })} options={codexModelOptions} />
+      <VoiceSelectRow title={t("settings.aiBrain.reasoningEffort")} description={t("settings.aiBrain.reasoningEffortDescription")} value={companion?.codex.reasoningEffort ?? ""} disabled={busy || codexModels?.status !== "ready" || !selectedCodexModel || !companion} onChange={(value) => saveCodex({ reasoningEffort: value })} options={reasoningOptions} />
+      <div className="settings-row"><div className="settings-row-info"><strong>{t("settings.aiBrain.providerHealth")}</strong><small>{codexHealth?.reason ?? (codexHealth?.ready ? t("settings.aiBrain.ready") : codexModels?.reason ?? t("settings.aiBrain.notChecked"))}</small></div><div className="flex gap-2 items-center"><span className={codexHealth?.ready ? "pill pill-green" : "pill pill-slate"}>{codexHealth?.ready ? t("settings.aiBrain.ready") : t("settings.aiBrain.notChecked")}</span>{!codexHealth?.ready && <Button variant="primary" size="compact" disabled={busy} onClick={() => onNavigate("integrations")}>{t("settings.aiBrain.configureCodex")}</Button>}<Button variant="secondary" size="compact" disabled={busy} onClick={() => void run(t("settings.busy.checking"), async () => { const models = await api.getCodexModels(true); setCodexModels(models); setCodexHealth(await api.getCompanionTargetHealth("codex", true)); })}>{t("settings.voice.check")}</Button></div></div>
+    </div>
+
+    {providerIds.map((provider) => {
+      const config = settings?.providers[provider];
+      const providerHealth = health[provider];
+      const active = companion?.target === "host-ai" && settings?.provider === provider;
+      const hasKey = secrets[provider].hasKey;
+      const supportsKey = provider !== "ollama";
+      const modelCatalog = modelCatalogs[provider];
+      const catalogOptions = modelCatalog
+        ? [
+            ...(config?.model && !modelCatalog.models.some((model) => model.id === config.model) ? [{ value: config.model, label: config.model }] : []),
+            ...modelCatalog.models.map((model) => ({ value: model.id, label: model.name === model.id ? model.id : `${model.name} · ${model.id}` })),
+          ]
+        : [];
+      return <div className={`settings-group ai-provider-card ${active ? "ai-provider-card-active" : ""}`} key={provider}>
+        <div className="settings-row ai-provider-card-header">
+          <div className="settings-row-info"><strong>{t(`settings.aiBrain.provider.${provider}`)}</strong><small>{t(`settings.aiBrain.provider.${provider}.description`)}</small></div>
+          <span className={active ? "pill pill-green" : "pill pill-slate"}>{active ? t("settings.aiBrain.active") : t("settings.aiBrain.configuredHere")}</span>
+        </div>
+        {config && <>
+          {modelCatalog
+            ? <><VoiceSelectRow title={t("settings.aiBrain.modelCatalog")} description={provider === "openrouter" ? t("settings.aiBrain.openrouterModelDescription") : t("settings.aiBrain.modelCatalogReady", { count: modelCatalog.models.length })} value={config.model} options={catalogOptions} disabled={busy} onChange={(value) => saveProvider(provider, { model: value })} /><VoiceTextRow title={t("settings.aiBrain.manualModel")} description={t("settings.aiBrain.manualModelDescription")} value={config.model} disabled={busy} onSave={(value) => saveProvider(provider, { model: value })} /></>
+            : <VoiceTextRow title={t("settings.plugins.model.title")} description={provider === "openrouter" ? t("settings.aiBrain.openrouterModelDescription") : t("settings.plugins.model.description")} value={config.model} placeholder={provider === "openrouter" ? "openrouter/free" : t("settings.plugins.model.placeholder")} disabled={busy} onSave={(value) => saveProvider(provider, { model: value })} />}
+          <div className="settings-row"><div className="settings-row-info"><strong>{t("settings.aiBrain.modelCatalog")}</strong><small>{modelCatalog ? t("settings.aiBrain.modelCatalogReady", { count: modelCatalog.models.length }) : t("settings.aiBrain.modelCatalogDescription")}</small></div><Button variant="secondary" size="compact" disabled={busy || (config.requiresApiKey && !hasKey)} onClick={() => loadProviderModels(provider)}>{modelCatalog ? t("settings.aiBrain.refreshModels") : t("settings.aiBrain.loadModels")}</Button></div>
+          {(provider === "ollama" || provider === "custom") && <VoiceTextRow title={t("settings.aiBrain.baseUrl")} description={t(`settings.aiBrain.provider.${provider}.urlDescription`)} type="url" value={config.baseUrl} disabled={busy} onSave={(value) => saveProvider(provider, { baseUrl: value })} />}
+          {provider === "openrouter" && <div className="settings-row"><div className="settings-row-info"><strong>{t("settings.aiBrain.endpoint")}</strong><small>https://openrouter.ai/api/v1</small></div><span className="pill pill-slate">{t("settings.aiBrain.managed")}</span></div>}
+          {provider === "custom" && <ToggleRow title={t("settings.aiBrain.customRequiresKey")} description={t("settings.aiBrain.customRequiresKeyDescription")} checked={config.requiresApiKey} disabled={busy} onChange={(checked) => saveProvider(provider, { requiresApiKey: checked })} />}
+          {supportsKey && <div className="settings-row"><div className="settings-row-info"><strong>{t("settings.plugins.apiKey.title")}</strong><small>{hasKey ? t("settings.plugins.apiKey.stored") : config.requiresApiKey ? t("settings.plugins.apiKey.none") : t("settings.aiBrain.keyOptional")}</small></div><div className="flex gap-2 items-center"><input type="password" className="settings-select" autoComplete="off" placeholder={hasKey ? t("settings.plugins.apiKey.placeholderStored") : t("settings.plugins.apiKey.placeholderEmpty")} value={keyDrafts[provider] ?? ""} disabled={busy} onChange={(event) => setKeyDrafts((current) => ({ ...current, [provider]: event.target.value }))} /><Button variant="secondary" size="compact" disabled={busy || !(keyDrafts[provider] ?? "").trim()} onClick={() => setProviderKey(provider, keyDrafts[provider] ?? "")}>{hasKey ? t("settings.aiBrain.replaceKey") : t("settings.plugins.apiKey.save")}</Button>{hasKey && <Button variant="secondary" size="compact" disabled={busy} onClick={() => setProviderKey(provider, null)}>{t("settings.plugins.apiKey.remove")}</Button>}</div></div>}
+          <div className="settings-row"><div className="settings-row-info"><strong>{t("settings.aiBrain.providerHealth")}</strong><small>{providerHealth?.error ?? (providerHealth?.ready ? `${providerHealth.model} · ${providerHealth.baseUrl ?? config.baseUrl}` : t("settings.aiBrain.notChecked"))}</small></div><div className="flex gap-2 items-center"><span className={providerHealth?.ready ? "pill pill-green" : providerHealth?.status === "error" ? "pill pill-orange" : "pill pill-slate"}>{providerHealth?.ready ? t("settings.aiBrain.ready") : providerHealth?.status ?? t("settings.aiBrain.notChecked")}</span><Button variant="secondary" size="compact" disabled={busy} onClick={() => checkProvider(provider)}>{t("settings.voice.check")}</Button></div></div>
+        </>}
+      </div>;
+    })}
+  </div>;
+}
+
+function AbilitiesSettingsPanel({ section, settings, secrets, busy, onSettings, onSecrets, run, setMessage }: {
+  section: "listen" | "speak" | "vision";
   settings: VoiceSettingsSnapshot | null;
   secrets: VoiceSecretStatus;
   busy: boolean;
@@ -1592,38 +1812,194 @@ function VoiceSettingsPanel({ settings, secrets, busy, onSettings, onSecrets, ru
   const [voices, setVoices] = useState<Partial<Record<VoiceProviderId, VoiceInfo[]>>>({});
   const [keyDrafts, setKeyDrafts] = useState<Record<string, string>>({});
   const [testText, setTestText] = useState(t("settings.voice.test.defaultText"));
-  const [testPetId, setTestPetId] = useState("");
-  const [listening, setListening] = useState<VoiceListeningSnapshot>({ state: "idle" });
   const [wakeHealth, setWakeHealth] = useState<VoiceWakeHealth | null>(null);
+  const [wakeSnapshot, setWakeSnapshot] = useState<VoiceWakeSnapshot | null>(null);
+  const [wakeCalibration, setWakeCalibration] = useState<VoiceWakeCalibrationSnapshot | null>(null);
+  const [companionSettings, setCompanionSettings] = useState<CompanionSettings | null>(null);
+  const [vision, setVision] = useState<VisionSnapshot | null>(null);
+  const [pocketTts, setPocketTts] = useState<PocketTtsSnapshot | null>(null);
+  const [transcriptionSettings, setTranscriptionSettings] = useState<VoiceTranscriptionSettings | null>(null);
+  const [transcriptionHealth, setTranscriptionHealth] = useState<VoiceTranscriptionHealth | null>(null);
+  const [localTranscription, setLocalTranscription] = useState<LocalTranscriptionSnapshot | null>(null);
+  const [transcriptionKeyDraft, setTranscriptionKeyDraft] = useState("");
+  const [permissions, setPermissions] = useState<DesktopPermissionSnapshot | null>(null);
+  const [permissionRestartSuggested, setPermissionRestartSuggested] = useState<Record<DesktopPermissionKind, boolean>>({ microphone: false, "screen-recording": false });
+  const [refreshDegraded, setRefreshDegraded] = useState(false);
+  const [microphoneDevices, setMicrophoneDevices] = useState<VoiceMicrophoneDevice[]>([]);
+
+  const refreshMicrophones = async () => {
+    if (section !== "listen" || !navigator.mediaDevices?.enumerateDevices) return;
+    const inputs = (await navigator.mediaDevices.enumerateDevices())
+      .filter((device) => device.kind === "audioinput" && device.deviceId && device.deviceId !== "default")
+      .map((device, index) => ({
+        deviceId: device.deviceId,
+        label: device.label || t("settings.abilities.listen.microphoneNumber", { number: index + 1 }),
+        ...(device.label ? { stableLabel: device.label } : {}),
+      }));
+    setMicrophoneDevices(inputs.filter((device, index) => inputs.findIndex((candidate) => candidate.deviceId === device.deviceId) === index));
+  };
+
+  const refreshAbilities = async (forceVision = false) => {
+    const [healthResult, wakeResult, calibrationResult, companionResult, visionResult, pocketResult, transcriptionSettingsResult, transcriptionHealthResult, localTranscriptionResult, permissionsResult] = await Promise.allSettled([
+      api.getVoiceWakeHealth(),
+      api.getVoiceWakeSnapshot(),
+      api.getVoiceWakeCalibrationSnapshot(),
+      api.getCompanionSettings(),
+      api.getVisionSnapshot(forceVision),
+      api.getPocketTtsSnapshot(),
+      api.getVoiceTranscriptionSettings(),
+      api.getVoiceTranscriptionHealth(),
+      api.getLocalTranscriptionSnapshot(),
+      api.getDesktopPermissions(),
+    ] as const);
+    if (healthResult.status === "fulfilled") setWakeHealth(healthResult.value);
+    if (wakeResult.status === "fulfilled") setWakeSnapshot(wakeResult.value);
+    if (calibrationResult.status === "fulfilled") setWakeCalibration(calibrationResult.value);
+    if (companionResult.status === "fulfilled") setCompanionSettings(companionResult.value);
+    if (visionResult.status === "fulfilled") setVision(visionResult.value);
+    if (pocketResult.status === "fulfilled") setPocketTts(pocketResult.value);
+    if (transcriptionSettingsResult.status === "fulfilled") setTranscriptionSettings(transcriptionSettingsResult.value);
+    if (transcriptionHealthResult.status === "fulfilled") setTranscriptionHealth(transcriptionHealthResult.value);
+    if (localTranscriptionResult.status === "fulfilled") setLocalTranscription(localTranscriptionResult.value);
+    if (transcriptionSettingsResult.status === "fulfilled" && transcriptionSettingsResult.value.providerId === "local" && transcriptionHealthResult.status === "fulfilled") {
+      await api.getLocalTranscriptionSnapshot().then(setLocalTranscription).catch(() => undefined);
+    }
+    if (permissionsResult.status === "fulfilled") setPermissions(permissionsResult.value);
+    if (section === "listen") await refreshMicrophones().catch(() => undefined);
+    const relevantResults = section === "listen"
+      ? [healthResult, wakeResult, calibrationResult, companionResult, transcriptionSettingsResult, transcriptionHealthResult, localTranscriptionResult, permissionsResult]
+      : section === "speak"
+        ? [pocketResult]
+        : [visionResult, permissionsResult];
+    setRefreshDegraded(relevantResults.some((result) => result.status === "rejected"));
+  };
 
   useEffect(() => {
-    void api.getVoiceListeningState().then(setListening).catch(() => undefined);
-    void api.getVoiceWakeHealth().then(setWakeHealth).catch(() => undefined);
-  }, []);
-  useEffect(() => {
-    if (!["starting", "listening", "stopping", "transcribing"].includes(listening.state)) return;
-    const timer = window.setInterval(() => void api.getVoiceListeningState().then(setListening).catch(() => undefined), 500);
-    return () => window.clearInterval(timer);
-  }, [listening.state]);
+    void refreshAbilities().catch(() => undefined);
+    const refreshAfterSystemSettings = () => {
+      void refreshAbilities().catch(() => undefined);
+    };
+    window.addEventListener("focus", refreshAfterSystemSettings);
+    const timer = window.setInterval(() => {
+      if (section === "listen") {
+        void api.getVoiceWakeSnapshot().then(setWakeSnapshot).catch(() => undefined);
+        void api.getVoiceWakeCalibrationSnapshot().then(setWakeCalibration).catch(() => undefined);
+        if (localTranscription?.status === "downloading") void api.getLocalTranscriptionSnapshot().then(setLocalTranscription).catch(() => undefined);
+      }
+      if (section === "speak") void api.getPocketTtsSnapshot().then(setPocketTts).catch(() => undefined);
+      if (section === "vision") void api.getVisionSnapshot(false).then(setVision).catch(() => undefined);
+    }, section === "vision" ? 15_000 : 1_000);
+    return () => {
+      window.removeEventListener("focus", refreshAfterSystemSettings);
+      window.clearInterval(timer);
+    };
+  }, [section, localTranscription?.status]);
 
-  const save = (patch: Record<string, unknown>) => void run(t("settings.busy.saving"), async () => {
+  const save = (patch: Record<string, unknown>, refreshWakeAfterSave = false) => void run(t("settings.busy.saving"), async () => {
     onSettings(await api.updateVoiceSettings(patch));
+    if (refreshWakeAfterSave) await refreshAbilities();
     setMessage(t("settings.voice.saved"));
   });
+  const setWakeEnabled = (enabled: boolean) => void run(t("settings.busy.saving"), async () => {
+    const next = await api.updateCompanionSettings({ wake: { enabled } });
+    setCompanionSettings(next);
+    await refreshAbilities();
+    setMessage(enabled ? t("settings.abilities.listen.enabledSaved") : t("settings.abilities.listen.disabledSaved"));
+  });
+  const setFollowUpEnabled = (followUpEnabled: boolean) => void run(t("settings.busy.saving"), async () => {
+    const next = await api.updateCompanionSettings({ wake: { followUpEnabled } });
+    setCompanionSettings(next);
+    setMessage(t("settings.voice.saved"));
+  });
+  const saveTranscription = (patch: Partial<VoiceTranscriptionSettings>) => void run(t("settings.busy.saving"), async () => {
+    setTranscriptionSettings(await api.updateVoiceTranscriptionSettings(patch));
+    setTranscriptionHealth(await api.getVoiceTranscriptionHealth());
+    setMessage(t("settings.abilities.listen.transcriptionSaved"));
+  });
+  const installLocalTranscription = () => void run(t("settings.abilities.listen.local.installing"), async () => {
+    const snapshot = await api.installLocalTranscription();
+    setLocalTranscription(snapshot);
+    if (snapshot.status !== "ready") throw new Error(snapshot.error ?? t("settings.abilities.listen.local.installFailed"));
+    setTranscriptionSettings(await api.getVoiceTranscriptionSettings());
+    setTranscriptionHealth(await api.getVoiceTranscriptionHealth());
+    await refreshAbilities();
+    setMessage(t("settings.abilities.listen.local.installed"));
+  });
+  const startWakeCalibration = () => void run(t("settings.abilities.listen.calibration.starting"), async () => {
+    setWakeCalibration(await api.startVoiceWakeCalibration(settings?.wake.phrase ?? ""));
+    setMessage(t("settings.abilities.listen.calibration.started"));
+  });
+  const cancelWakeCalibration = () => void run(t("settings.abilities.listen.calibration.cancelling"), async () => {
+    setWakeCalibration(await api.cancelVoiceWakeCalibration());
+    await refreshAbilities();
+    setMessage(t("settings.abilities.listen.calibration.cancelled"));
+  });
+  const saveWakeCalibration = () => void run(t("settings.abilities.listen.calibration.saving"), async () => {
+    setWakeCalibration(await api.saveVoiceWakeCalibration());
+    onSettings(await api.getVoiceSettings());
+    await refreshAbilities();
+    setMessage(t("settings.abilities.listen.calibration.saved"));
+  });
+  const deleteWakeInterpretation = (value: string) => void run(t("settings.abilities.listen.calibration.deleting"), async () => {
+    setWakeCalibration(await api.deleteVoiceWakeCalibrationInterpretation(value));
+    onSettings(await api.getVoiceSettings());
+    await refreshAbilities();
+    setMessage(t("settings.abilities.listen.calibration.deleted"));
+  });
+  const resetWakeCalibration = () => void run(t("settings.abilities.listen.calibration.resetting"), async () => {
+    setWakeCalibration(await api.resetVoiceWakeCalibration());
+    onSettings(await api.getVoiceSettings());
+    await refreshAbilities();
+    setMessage(t("settings.abilities.listen.calibration.reset"));
+  });
+  const requestPermission = (kind: DesktopPermissionKind) => void run(t("settings.busy.checking"), async () => {
+    const next = await api.requestDesktopPermission(kind);
+    setPermissions(next);
+    if (next.appLocation === "applications" && next.permissions[kind].requiresRestartAfterGrant) {
+      setPermissionRestartSuggested((current) => ({ ...current, [kind]: true }));
+    }
+    setMessage(t(kind === "microphone" ? "settings.permissions.microphoneRequested" : "settings.permissions.screenRequested"));
+  });
+  const openPermissionSettings = (kind: DesktopPermissionKind) => void run(t("settings.busy.opening"), async () => {
+    const next = await api.openDesktopPermissionSettings(kind);
+    setPermissions(next);
+    if (next.appLocation === "applications" && next.permissions[kind].requiresRestartAfterGrant) {
+      setPermissionRestartSuggested((current) => ({ ...current, [kind]: true }));
+    }
+    setMessage(t("settings.permissions.opened"));
+  });
+  const setVisionEnabled = (enabled: boolean) => void run(t("settings.busy.saving"), async () => {
+    const next = await api.setVisionEnabled(enabled);
+    setVision(next);
+    setMessage(enabled
+      ? t("settings.abilities.vision.enabledSaved")
+      : next.storage.deleteError || !next.storage.persisted
+        ? t("settings.abilities.vision.deleteFailed")
+        : t("settings.abilities.vision.disabledDeleted"));
+  });
+  const pauseVision = (minutes: 30 | 60 | 90) => void run(t("settings.busy.saving"), async () => {
+    setVision(await api.pauseVision(minutes));
+    setMessage(t("settings.abilities.vision.pausedSaved"));
+  });
+  const resumeVision = () => void run(t("settings.busy.saving"), async () => {
+    setVision(await api.resumeVision());
+    setMessage(t("settings.abilities.vision.resumedSaved"));
+  });
+  const checkVision = () => void run(t("settings.busy.checking"), async () => {
+    const [next, nextPermissions] = await Promise.all([api.getVisionSnapshot(true), api.getDesktopPermissions()]);
+    setVision(next);
+    setPermissions(nextPermissions);
+    if (!next.capture.ready || !next.summary.ready) {
+      throw new Error(next.capture.reason ?? next.summary.reason ?? t("settings.abilities.vision.status.blocked"));
+    }
+    setMessage(t("settings.abilities.vision.checkReady"));
+  });
   const saveProvider = (id: VoiceProviderId, patch: Record<string, unknown>) => settings && save({ providers: { [id]: { ...settings.providers[id], ...patch } } });
-  const savePetOverride = (petId: string, patch: Record<string, unknown>) => {
-    if (!settings) return;
-    const next = { ...settings.petOverrides };
-    const value = { ...(next[petId] ?? {}), ...patch } as Record<string, unknown>;
-    for (const [key, entry] of Object.entries(value)) if (!entry || entry === "inherit") delete value[key];
-    if (Object.keys(value).length) next[petId] = value as VoiceSettingsSnapshot["petOverrides"][string];
-    else delete next[petId];
-    save({ petOverrides: next });
-  };
   const check = (id: VoiceProviderId) => void run(t("settings.busy.checking"), async () => {
     const result = await api.checkVoiceProviderHealth(id);
     setHealth((current) => ({ ...current, [id]: result }));
-    setMessage(result.ready ? t("settings.voice.health.ready") : result.reason ?? t("settings.voice.health.unavailable"));
+    if (!result.ready) throw new Error(result.reason ?? t("settings.voice.health.unavailable"));
+    setMessage(t("settings.voice.health.ready"));
   });
   const discover = (id: VoiceProviderId) => void run(t("settings.busy.checking"), async () => {
     const result = await api.discoverVoiceProviderVoices(id);
@@ -1631,17 +2007,216 @@ function VoiceSettingsPanel({ settings, secrets, busy, onSettings, onSecrets, ru
     setVoices((current) => ({ ...current, [id]: result.voices }));
     setMessage(result.supported ? t("settings.voice.voices.found", { count: result.voices.length }) : t("settings.voice.voices.manual"));
   });
+  const testProvider = (id: VoiceProviderId) => void run(t("settings.voice.testing"), async () => {
+    const config = settings?.providers[id];
+    const result = await api.testVoiceSpeech({
+      text: testText,
+      providerId: id,
+      petId: selectedPetId,
+      ...(config?.voiceId ? { voiceId: config.voiceId } : {}),
+      ...(config && "model" in config && config.model ? { model: config.model } : {}),
+    });
+    if (!result.ok) throw new Error(result.attempts.at(-1)?.message ?? t("settings.voice.test.failed"));
+    setHealth((current) => ({ ...current, [id]: {
+      providerId: id,
+      checkedAt: Date.now(),
+      expiresAt: Date.now() + 60_000,
+      configured: true,
+      reachable: true,
+      synthesisTested: true,
+      discoverySupported: id === "system" || id === "elevenlabs",
+      ready: true,
+      method: "settings-test",
+    } }));
+    setMessage(t("settings.voice.test.successForProvider", { provider: voiceProviderLabel(id, t) }));
+  });
+  const installPocketTts = () => void run(t("settings.voice.pocket.installing"), async () => {
+    const next = await api.installAndEnablePocketTts();
+    setPocketTts(next);
+    if (next.status !== "ready") throw new Error(next.error ?? t("settings.voice.pocket.failed"));
+    onSettings(await api.getVoiceSettings());
+    setHealth((current) => ({ ...current, pockettts: undefined }));
+    setMessage(t("settings.voice.pocket.ready"));
+  });
+  const startPocketTts = () => void run(t("settings.voice.pocket.starting"), async () => {
+    const next = await api.startPocketTts();
+    setPocketTts(next);
+    if (next.status !== "ready") throw new Error(next.error ?? t("settings.voice.pocket.failed"));
+    onSettings(await api.updateVoiceSettings({ output: { ...settings?.output, providerId: "pockettts" } }));
+    setHealth((current) => ({ ...current, pockettts: undefined }));
+    setMessage(t("settings.voice.pocket.ready"));
+  });
+  const stopPocketTts = () => void run(t("settings.voice.pocket.stopping"), async () => {
+    setPocketTts(await api.stopPocketTts());
+    onSettings(await api.getVoiceSettings());
+    setHealth((current) => ({ ...current, pockettts: undefined }));
+    setMessage(t("settings.voice.pocket.stopped"));
+  });
+
+  useEffect(() => {
+    if (section !== "speak" || voices.system !== undefined) return;
+    void api.discoverVoiceProviderVoices("system").then((result) => {
+      setHealth((current) => ({ ...current, system: result.evidence }));
+      setVoices((current) => ({ ...current, system: result.voices }));
+    }).catch(() => {
+      setVoices((current) => ({ ...current, system: [] }));
+    });
+  }, [section, voices.system]);
 
   if (!settings) return <div className="settings-section"><p>{t("settings.voice.loading")}</p></div>;
   const availablePets = settings.installedPets.filter((pet) => pet.available);
-  const selectedPetId = testPetId || availablePets[0]?.id || "";
+  const selectedPetId = availablePets[0]?.id || "";
   const orderedProviderIds = [settings.output.providerId, ...providerIds.filter((id) => id !== settings.output.providerId)];
+  const visionStatusKey = !vision || vision.state === "checking"
+    ? "settings.abilities.listen.checking"
+    : vision.state === "off"
+      ? "settings.abilities.vision.status.off"
+      : vision.state === "paused"
+        ? "settings.abilities.vision.status.paused"
+        : vision.state === "capturing"
+          ? "settings.abilities.vision.status.capturing"
+          : vision.state === "summarizing"
+            ? "settings.abilities.vision.status.summarizing"
+            : vision.state === "blocked"
+              ? "settings.abilities.vision.status.blocked"
+              : vision.state === "error"
+                ? "settings.abilities.vision.status.error"
+                : "settings.abilities.vision.status.enabled";
+  const visionStatus = visionStatusKey === "settings.abilities.vision.status.paused" && vision?.pausedUntil
+    ? t(visionStatusKey, { time: new Date(vision.pausedUntil).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) })
+    : t(visionStatusKey);
+  const wakeHasRecentPcm = Boolean(
+    wakeSnapshot?.diagnostics?.lastPcmFrameAt
+    && wakeSnapshot.diagnostics.pcmFramesReceived > 0
+    && Date.now() - wakeSnapshot.diagnostics.lastPcmFrameAt < 5_000
+  );
+  const wakeVerified = Boolean(wakeSnapshot?.armed && wakeHasRecentPcm);
+  const wakeStatusKey = wakeVerified
+    ? "settings.abilities.listen.listening"
+    : !wakeHealth
+      ? "settings.abilities.listen.checking"
+      : !wakeHealth.ready
+        ? "settings.abilities.listen.unavailable"
+        : !companionSettings?.enabled
+          ? "settings.abilities.listen.enableCompanion"
+          : !settings.wake.phrase.trim()
+            ? "settings.abilities.listen.choosePhrase"
+            : wakeSnapshot?.captureState === "error"
+              ? "settings.abilities.listen.needsAttention"
+              : companionSettings.wake.enabled
+                ? "settings.abilities.listen.starting"
+                : "settings.abilities.listen.off";
+
+  const sectionTitle = section === "listen" ? t("settings.abilities.listen.pageTitle") : section === "speak" ? t("settings.abilities.speak.pageTitle") : t("settings.abilities.vision.title");
+  const sectionDescription = section === "listen" ? t("settings.abilities.listen.pageDescription") : section === "speak" ? t("settings.abilities.speak.description") : t("settings.abilities.vision.description");
+  const diagnostics = wakeSnapshot?.diagnostics;
+  const pocketVoices = pocketTts?.voices ?? [];
+  const microphonePermission = permissions?.permissions.microphone;
+  const screenPermission = permissions?.permissions["screen-recording"];
+  const microphonePermissionReady = permissions?.platform !== "darwin" || microphonePermission?.status === "granted";
+  const offerMicrophoneRestart = permissions?.appLocation === "applications" && Boolean(microphonePermission?.requiresRestartAfterGrant) && (microphonePermission?.status === "granted" || permissionRestartSuggested.microphone);
+  const offerScreenRestart = permissions?.appLocation === "applications" && Boolean(screenPermission?.requiresRestartAfterGrant) && (screenPermission?.status === "granted" || permissionRestartSuggested["screen-recording"]);
+  const calibrationCapturing = wakeCalibration?.state === "preparing" || wakeCalibration?.state === "listening" || wakeCalibration?.state === "transcribing";
+  const inputRms = calibrationCapturing ? wakeCalibration?.lastPcmRms : wakeSnapshot?.diagnostics?.lastPcmRms;
+  const inputAt = calibrationCapturing ? wakeCalibration?.lastPcmFrameAt : wakeSnapshot?.diagnostics?.lastPcmFrameAt;
+  const inputLevel = !inputAt || Date.now() - inputAt > 3_000 || inputRms === undefined
+    ? 0
+    : inputRms < 0.003
+      ? 1
+      : inputRms < 0.015
+        ? 2
+        : inputRms < 0.08
+          ? 3
+          : 4;
+  const inputLevelKey = inputLevel === 0 ? "waiting" : inputLevel === 1 ? "veryQuiet" : inputLevel === 2 ? "low" : inputLevel === 3 ? "good" : "loud";
+  const savedMicrophoneMissing = Boolean(settings.wake.microphone?.deviceId && !microphoneDevices.some((device) =>
+    device.deviceId === settings.wake.microphone?.deviceId || Boolean(settings.wake.microphone?.label && device.stableLabel === settings.wake.microphone.label)
+  ));
 
   return <div className="settings-section">
-    <p className="eyebrow">{t("settings.voice.eyebrow")}</p>
-    <h2 className="settings-section-title">{t("settings.voice.title")}</h2>
-    <p className="text-sm text-slatecopy -mt-2 mb-2">{t("settings.voice.description")}</p>
+    <p className="eyebrow">{t("settings.abilities.eyebrow")}</p>
+    <h2 className="settings-section-title">{sectionTitle}</h2>
+    <p className="text-sm text-slatecopy -mt-2 mb-2">{sectionDescription}</p>
+    {refreshDegraded && <div className="settings-row"><div className="settings-row-info"><small>{t("settings.abilities.partialUnavailable")}</small></div><Button variant="secondary" size="compact" disabled={busy} onClick={() => void run(t("settings.busy.checking"), () => refreshAbilities())}>{t("common.retry")}</Button></div>}
 
+    {section === "listen" && <div className="settings-group">
+      <div className="settings-row"><div className="settings-row-info"><strong>{t("settings.abilities.listen.title")}</strong><small>{t("settings.abilities.listen.privacy")}</small><small>{wakeSnapshot?.reason ?? wakeHealth?.reason ?? t("settings.abilities.listen.description")}</small></div><span className={wakeVerified ? "pill pill-green" : wakeSnapshot?.captureState === "error" ? "pill pill-orange" : "pill pill-slate"}>{t(wakeStatusKey)}</span></div>
+      <ToggleRow title={t("settings.abilities.listen.toggle")} description={t("settings.abilities.listen.toggleDescription")} checked={companionSettings?.wake.enabled ?? false} disabled={busy || (!companionSettings?.wake.enabled && (!wakeHealth?.ready || !companionSettings?.enabled || !settings.wake.phrase.trim() || !transcriptionHealth?.ready || !microphonePermissionReady))} onChange={setWakeEnabled} />
+      <ToggleRow title={t("settings.abilities.listen.followUp")} description={t("settings.abilities.listen.followUpDescription")} checked={companionSettings?.wake.followUpEnabled ?? true} disabled={busy || !companionSettings?.wake.enabled} onChange={setFollowUpEnabled} />
+      {permissions?.platform === "darwin" && <>
+        <div className="settings-row"><div className="settings-row-info"><strong>{t("settings.permissions.microphone")}</strong><small>{t("settings.permissions.microphoneDescription")}</small><small>{permissions.appLocation === "development" ? t("settings.permissions.developmentCopy") : t("settings.permissions.status", { status: microphonePermission?.status ?? "unknown" })}</small>{offerMicrophoneRestart && <small>{t("settings.permissions.restartAfterGrant")}</small>}</div><div className="flex gap-2 items-center"><span className={microphonePermission?.status === "granted" ? "pill pill-green" : "pill pill-orange"}>{microphonePermission?.status ?? "unknown"}</span>{microphonePermission?.status !== "granted" && microphonePermission?.canRequest && <Button variant="primary" size="compact" disabled={busy} onClick={() => requestPermission("microphone")}>{t("settings.permissions.request")}</Button>}{microphonePermission?.canOpenSettings && <Button variant="secondary" size="compact" disabled={busy} onClick={() => openPermissionSettings("microphone")}>{t("settings.permissions.openSettings")}</Button>}{offerMicrophoneRestart && <Button variant="secondary" size="compact" disabled={busy} onClick={() => void api.restartForDesktopPermissions()}>{t("settings.permissions.restart")}</Button>}</div></div>
+      </>}
+      <VoiceSelectRow
+        title={t("settings.abilities.listen.microphoneSelect")}
+        description={savedMicrophoneMissing ? t("settings.abilities.listen.microphoneFallback") : t("settings.abilities.listen.microphoneSelectDescription")}
+        value={savedMicrophoneMissing ? "" : settings.wake.microphone?.deviceId ?? ""}
+        disabled={busy}
+        onChange={(value) => {
+          const selected = microphoneDevices.find((device) => device.deviceId === value);
+          save({ wake: { microphone: { deviceId: value, ...(selected?.stableLabel ? { label: selected.stableLabel } : {}) } } }, true);
+        }}
+        options={[
+          { value: "", label: t("settings.abilities.listen.microphoneSystemDefault") },
+          ...microphoneDevices.map((device) => ({ value: device.deviceId, label: device.label })),
+        ]}
+      />
+      <div className="settings-row">
+        <div className="settings-row-info"><strong>{t("settings.abilities.listen.inputLevel")}</strong><small>{t("settings.abilities.listen.inputLevelDescription")}</small></div>
+        <div className="wake-input-level" aria-label={t(`settings.abilities.listen.inputLevel.${inputLevelKey}`)}>
+          <div className="wake-input-level-bars" aria-hidden="true">{[1, 2, 3, 4].map((bar) => <span key={bar} className={bar <= inputLevel ? "is-active" : ""} />)}</div>
+          <span>{t(`settings.abilities.listen.inputLevel.${inputLevelKey}`)}</span>
+        </div>
+      </div>
+      <div className="settings-row"><div className="settings-row-info"><strong>{t("settings.abilities.listen.speechRecognition")}</strong><small>{transcriptionHealth?.reason ?? (transcriptionHealth?.ready ? t("settings.abilities.listen.speechRecognitionReady") : t("settings.abilities.listen.speechRecognitionDescription"))}</small></div><span className={transcriptionHealth?.ready ? "pill pill-green" : "pill pill-orange"}>{transcriptionHealth?.ready ? t("settings.aiBrain.ready") : t("settings.aiBrain.needsAttention")}</span></div>
+      <VoiceSelectRow title={t("settings.abilities.listen.transcriptionProvider")} description={t("settings.abilities.listen.transcriptionProviderDescription")} value={transcriptionSettings?.providerId ?? "local"} disabled={busy || !transcriptionSettings} onChange={(value) => saveTranscription({ providerId: value as VoiceTranscriptionSettings["providerId"] })} options={[{ value: "local", label: t("settings.abilities.listen.local.provider") }, { value: "openai", label: t("settings.abilities.listen.openaiProvider") }, { value: "none", label: t("settings.plugins.aiProvider.disabled") }]} />
+      {transcriptionSettings?.providerId === "local" && <div className="settings-row"><div className="settings-row-info"><strong>{localTranscription?.modelLabel ?? t("settings.abilities.listen.local.provider")}</strong><small>{localTranscription?.error ?? localTranscription?.progress ?? t("settings.abilities.listen.local.description", { size: Math.round((localTranscription?.downloadBytes ?? 0) / 1024 / 1024) })}</small><small>{localTranscription ? t("settings.abilities.listen.local.storage", { path: localTranscription.storageLocation }) : t("settings.abilities.listen.local.offline")}</small></div><div className="flex gap-2 items-center"><span className={localTranscription?.status === "ready" ? "pill pill-green" : localTranscription?.status === "error" ? "pill pill-orange" : "pill pill-slate"}>{t(`settings.abilities.listen.local.status.${localTranscription?.status ?? "not-installed"}`)}</span>{localTranscription?.status !== "ready" && <Button variant="primary" size="compact" disabled={busy || localTranscription?.status === "downloading"} onClick={installLocalTranscription}>{t("settings.abilities.listen.local.downloadEnable")}</Button>}</div></div>}
+      {transcriptionSettings?.providerId === "openai" && <div className="settings-row"><div className="settings-row-info"><strong>{t("settings.voice.apiKey")}</strong><small>{secrets["openai-compatible"].hasKey ? t("settings.voice.apiKeyStored") : t("settings.voice.apiKeyNone")}</small><small>{t("settings.abilities.listen.transcriptionModel", { model: transcriptionSettings.model })}</small></div><div className="flex gap-2 items-center"><input className="settings-select" type="password" value={transcriptionKeyDraft} disabled={busy} placeholder={t("settings.voice.apiKeyPlaceholder")} onChange={(event) => setTranscriptionKeyDraft(event.target.value)} /><Button variant="secondary" size="compact" disabled={busy || !transcriptionKeyDraft} onClick={() => void run(t("settings.busy.saving"), async () => { onSecrets(await api.setVoiceSecret("openai-compatible", transcriptionKeyDraft)); setTranscriptionKeyDraft(""); setTranscriptionHealth(await api.getVoiceTranscriptionHealth()); setMessage(t("settings.voice.saved")); })}>{t("settings.voice.saveKey")}</Button>{secrets["openai-compatible"].hasKey && <Button variant="secondary" size="compact" disabled={busy} onClick={() => void run(t("settings.busy.saving"), async () => { onSecrets(await api.setVoiceSecret("openai-compatible", null)); setTranscriptionHealth(await api.getVoiceTranscriptionHealth()); setMessage(t("settings.voice.saved")); })}>{t("settings.voice.removeKey")}</Button>}</div></div>}
+      {transcriptionSettings?.providerId === "openai" && <VoiceTextRow title={t("settings.abilities.listen.openaiBaseUrl")} description={t("settings.abilities.listen.openaiBaseUrlDescription")} type="url" value={transcriptionSettings.baseUrl} disabled={busy} onSave={(value) => saveTranscription({ baseUrl: value })} />}
+      {transcriptionSettings?.providerId === "openai" && <VoiceTextRow title={t("settings.abilities.listen.openaiModel")} description={t("settings.abilities.listen.openaiModelDescription")} value={transcriptionSettings.model} disabled={busy} onSave={(value) => saveTranscription({ model: value })} />}
+      {companionSettings && !companionSettings.enabled && <div className="companion-disclosure"><strong>{t("pets.companion.enableTitle")}</strong><p>{t("pets.companion.enableDisclosure")}</p><Button variant="primary" size="compact" disabled={busy} onClick={() => void run(t("settings.busy.saving"), async () => { setCompanionSettings(await api.enableCompanion()); await refreshAbilities(); setMessage(t("pets.companion.enabled")); })}>{t("pets.companion.enable")}</Button></div>}
+      <VoiceSelectRow title={t("settings.abilities.listen.engine")} description={t("settings.abilities.listen.engineDescription")} value={settings.wake.engine} disabled={busy || companionSettings?.wake.enabled === true} onChange={(value) => save({ wake: { engine: value } }, true)} options={[{ value: "official-livekit", label: t("settings.abilities.listen.engineOfficial") }, { value: "custom-sherpa", label: t("settings.abilities.listen.engineCustom") }]} />
+      {settings.wake.engine === "official-livekit" && <>
+        <div className="settings-row"><div className="settings-row-info"><strong>{t("settings.abilities.listen.phrase")}</strong><small>{t("settings.abilities.listen.officialPhraseDescription")}</small></div><span className="pill pill-slate">Hey Pedra</span></div>
+        <VoiceSelectRow title={t("settings.abilities.listen.sensitivity")} description={t("settings.abilities.listen.sensitivityDescription")} value={settings.wake.sensitivity} disabled={busy} onChange={(value) => save({ wake: { sensitivity: value } }, true)} options={[{ value: "easy", label: t("settings.abilities.listen.sensitivityEasy") }, { value: "balanced", label: t("settings.abilities.listen.sensitivityBalanced") }, { value: "strict", label: t("settings.abilities.listen.sensitivityStrict") }]} />
+      </>}
+      {settings.wake.engine === "custom-sherpa" && <VoiceTextRow title={t("settings.abilities.listen.phrase")} description={t("settings.abilities.listen.customPhraseDescription")} value={settings.wake.phrase} placeholder={t("settings.abilities.listen.phrasePlaceholder")} disabled={busy} onSave={(value) => save({ wake: { phrase: value } }, true)} />}
+      {settings.wake.engine === "custom-sherpa" && <div className="wake-calibration-card">
+        <div className="settings-row-info">
+          <strong>{t("settings.abilities.listen.calibration.title")}</strong>
+          <small>{t("settings.abilities.listen.calibration.description")}</small>
+          <small>{t("settings.abilities.listen.calibration.privacy")}</small>
+          {(wakeCalibration?.state === "listening" || wakeCalibration?.state === "transcribing" || wakeCalibration?.state === "preparing") && <small className="wake-calibration-prompt">{wakeCalibration.state === "transcribing" ? t("settings.abilities.listen.calibration.processing") : t("settings.abilities.listen.calibration.sayPhrase", { phrase: settings.wake.phrase, current: wakeCalibration.completedSamples + 1, total: wakeCalibration.requiredSamples })}</small>}
+          {wakeCalibration?.state === "review" && <small className="wake-calibration-prompt">{wakeCalibration.batchInterpretations?.length ? t("settings.abilities.listen.calibration.review", { variants: wakeCalibration.batchInterpretations.join(", ") }) : t("settings.abilities.listen.calibration.noVariants")}</small>}
+          {wakeCalibration?.state === "review" && <small>{t("settings.abilities.listen.calibration.detectionCheck", { detected: wakeCalibration.detectedSamples, total: wakeCalibration.completedSamples })}</small>}
+          {Boolean(wakeCalibration?.savedInterpretations?.length) && <>
+            <small><strong>{t("settings.abilities.listen.calibration.savedTitle")}</strong></small>
+            <div className="wake-calibration-interpretations">
+              {wakeCalibration?.savedInterpretations?.map((value) => <button key={value} type="button" className="wake-calibration-interpretation" disabled={busy || ["preparing", "listening", "transcribing", "review", "saving"].includes(wakeCalibration.state)} aria-label={t("settings.abilities.listen.calibration.deleteLabel", { value })} onClick={() => deleteWakeInterpretation(value)}><span>{value}</span><span aria-hidden="true">×</span></button>)}
+            </div>
+          </>}
+          {(wakeCalibration?.savedInterpretations?.length ?? 0) > (wakeCalibration?.activeRuntimeInterpretations?.length ?? 0) && <small>{t("settings.abilities.listen.calibration.activeLimit", { active: wakeCalibration?.activeRuntimeInterpretations?.length ?? 0, saved: wakeCalibration?.savedInterpretations?.length ?? 0 })}</small>}
+          {wakeCalibration?.reason && <small className="text-red-700">{wakeCalibration.reason}</small>}
+        </div>
+        <div className="wake-calibration-actions">
+          {(wakeCalibration?.state === "preparing" || wakeCalibration?.state === "listening" || wakeCalibration?.state === "transcribing") && <><span className="pill pill-slate">{t("settings.abilities.listen.calibration.progress", { current: wakeCalibration.completedSamples, total: wakeCalibration.requiredSamples })}</span><Button variant="secondary" size="compact" disabled={busy} onClick={cancelWakeCalibration}>{t("common.cancel")}</Button></>}
+          {wakeCalibration?.state === "review" && <><Button variant="primary" size="compact" disabled={busy} onClick={saveWakeCalibration}>{t("settings.abilities.listen.calibration.save")}</Button><Button variant="secondary" size="compact" disabled={busy} onClick={cancelWakeCalibration}>{t("common.cancel")}</Button></>}
+          {wakeCalibration?.calibrated && wakeCalibration.state !== "review" && <><span className="pill pill-green">{t("settings.abilities.listen.calibration.calibrated")}</span><Button variant="secondary" size="compact" disabled={busy} onClick={resetWakeCalibration}>{t("settings.abilities.listen.calibration.resetButton")}</Button></>}
+          {!["preparing", "listening", "transcribing", "review", "saving"].includes(wakeCalibration?.state ?? "idle") && localTranscription?.status === "ready" && <Button variant="primary" size="compact" disabled={busy || !settings.wake.phrase.trim() || !microphonePermissionReady} onClick={startWakeCalibration}>{wakeCalibration?.calibrated ? t("settings.abilities.listen.calibration.recordMore") : t("settings.abilities.listen.calibration.start")}</Button>}
+          {localTranscription?.status !== "ready" && <Button variant="primary" size="compact" disabled={busy || localTranscription?.status === "downloading"} onClick={installLocalTranscription}>{t("settings.abilities.listen.calibration.download")}</Button>}
+        </div>
+      </div>}
+      {(companionSettings?.wake.enabled || wakeSnapshot?.captureState === "error") && <>
+        <div className="settings-row"><div className="settings-row-info"><strong>{t("settings.abilities.listen.pipeline")}</strong><small>{t("settings.abilities.listen.pipelineDescription")}</small></div></div>
+        <AbilityDiagnosticRow label={t("settings.abilities.listen.capture")} ready={Boolean(diagnostics?.captureStartedAt)} detail={diagnostics?.captureStartedAt ? t("settings.abilities.listen.started") : t("settings.abilities.listen.waitingForCapture")} />
+        <AbilityDiagnosticRow label={t("settings.abilities.listen.helper")} ready={Boolean(diagnostics?.helperStartedAt)} detail={diagnostics?.helperStartedAt ? t("settings.abilities.listen.connected") : t("settings.abilities.listen.waitingForHelper")} />
+        <AbilityDiagnosticRow label={t("settings.abilities.listen.microphone")} ready={wakeHasRecentPcm} detail={wakeHasRecentPcm ? t("settings.abilities.listen.audioFrames", { count: diagnostics?.pcmFramesReceived ?? 0 }) : t("settings.abilities.listen.noAudioFrames")} />
+        <AbilityDiagnosticRow label={t("settings.abilities.listen.transcription")} ready={Boolean(diagnostics?.lastTranscriptionAt && diagnostics?.lastFailureStage !== "transcription")} detail={diagnostics?.lastFailureStage === "transcription" ? diagnostics.lastError ?? t("settings.abilities.listen.transcriptionFailed") : diagnostics?.lastTranscriptionAt ? t("settings.abilities.listen.transcriptionSucceeded") : transcriptionHealth?.ready ? t("settings.abilities.listen.transcriptionReadyToTest", { provider: transcriptionSettings?.providerId === "local" ? t("settings.abilities.listen.local.provider") : t("settings.abilities.listen.openaiProvider") }) : t("settings.abilities.listen.transcriptionConfigure")} neutral={!diagnostics?.lastTranscriptionAt && diagnostics?.lastFailureStage !== "transcription"} />
+        <AbilityDiagnosticRow label={t("settings.abilities.listen.aiResponse")} ready={Boolean(diagnostics?.lastCompanionTurnAt && diagnostics?.lastFailureStage !== "companion")} detail={diagnostics?.lastFailureStage === "companion" ? diagnostics.lastError ?? t("settings.abilities.listen.aiResponseFailed") : diagnostics?.lastCompanionTurnAt ? t("settings.abilities.listen.aiResponseSucceeded") : t("settings.abilities.listen.aiResponseNotTested")} neutral={!diagnostics?.lastCompanionTurnAt && diagnostics?.lastFailureStage !== "companion"} />
+        <AbilityDiagnosticRow label={t("settings.abilities.listen.lastTurn")} ready={Boolean(diagnostics?.lastCompanionTurnAt)} detail={diagnostics?.lastCompanionTurnAt ? new Date(diagnostics.lastCompanionTurnAt).toLocaleTimeString() : t("settings.abilities.listen.noTurnYet")} neutral={!diagnostics?.lastCompanionTurnAt} />
+      </>}
+    </div>}
+
+    {section === "speak" && <>
     <div className="settings-group">
       <VoiceSelectRow title={t("settings.voice.defaultProvider")} description={t("settings.voice.defaultProviderDescription")} value={settings.output.providerId} disabled={busy} onChange={(value) => save({ output: { ...settings.output, providerId: value } })} options={providerIds.map((id) => ({ value: id, label: voiceProviderLabel(id, t) }))} />
       <VoiceSelectRow title={t("settings.voice.overlap")} description={t("settings.voice.overlapDescription")} value={settings.output.overlapPolicy} disabled={busy} onChange={(value) => save({ output: { ...settings.output, overlapPolicy: value } })} options={[{ value: "interrupt", label: t("settings.voice.overlap.interrupt") }, { value: "queue", label: t("settings.voice.overlap.queue") }, { value: "ignore", label: t("settings.voice.overlap.ignore") }]} />
@@ -1655,36 +2230,43 @@ function VoiceSettingsPanel({ settings, secrets, busy, onSettings, onSecrets, ru
       const secretId = id === "openai-compatible" || id === "elevenlabs" ? id : null;
       const isDefault = id === settings.output.providerId;
       const supportsDiscovery = id === "system" || id === "elevenlabs";
+      const displayVoices = id === "pockettts" ? pocketVoices : foundVoices;
+      const pocketBusy = id === "pockettts" && (pocketTts?.status === "installing" || pocketTts?.status === "starting" || pocketTts?.status === "warming");
+      const pocketReady = id === "pockettts" && pocketTts?.status === "ready";
       return <div className="settings-group" key={id}>
         <div className="settings-row">
-          <div className="settings-row-info"><strong>{voiceProviderLabel(id, t)}</strong><small>{voiceProviderDescription(id, t)}</small><small>{evidence ? (evidence.ready ? t("settings.voice.health.ready") : evidence.reason ?? t("settings.voice.health.unavailable")) : t("settings.voice.health.notChecked")}</small></div>
-          <div className="flex gap-2 items-center">{isDefault && <span className="pill pill-green">{t("settings.voice.defaultBadge")}</span>}<span className={evidence?.ready ? "pill pill-green" : evidence ? "pill pill-orange" : "pill pill-slate"}>{evidence?.ready ? t("settings.voice.connected") : t("settings.voice.notConnected")}</span><Button variant="secondary" size="compact" disabled={busy} onClick={() => check(id)}>{t("settings.voice.check")}</Button>{supportsDiscovery && <Button variant="secondary" size="compact" disabled={busy} onClick={() => discover(id)}>{t("settings.voice.findProviderVoices", { provider: voiceProviderLabel(id, t) })}</Button>}</div>
+          <div className="settings-row-info"><strong>{voiceProviderLabel(id, t)}</strong><small>{voiceProviderDescription(id, t)}</small><small>{id === "pockettts" ? pocketTts?.error ?? pocketTts?.progress ?? t("settings.voice.pocket.notInstalled") : evidence ? (evidence.ready ? t("settings.voice.health.ready") : evidence.reason ?? t("settings.voice.health.unavailable")) : t("settings.voice.health.notChecked")}</small></div>
+          <div className="flex gap-2 items-center">{isDefault && <span className="pill pill-green">{t("settings.voice.defaultBadge")}</span>}<span className={(evidence?.ready || pocketReady) ? "pill pill-green" : (evidence || pocketTts?.error) ? "pill pill-orange" : "pill pill-slate"}>{id === "pockettts" ? t(`settings.voice.pocket.status.${pocketTts?.status ?? "not-installed"}`) : evidence?.ready ? t("settings.voice.connected") : t("settings.voice.notConnected")}</span><Button variant="secondary" size="compact" disabled={busy || pocketBusy} onClick={() => testProvider(id)}>{t("settings.voice.test.button")}</Button>{id !== "pockettts" && <Button variant="secondary" size="compact" disabled={busy} onClick={() => check(id)}>{t("settings.voice.check")}</Button>}{supportsDiscovery && <Button variant="secondary" size="compact" disabled={busy} onClick={() => discover(id)}>{t("settings.voice.findProviderVoices", { provider: voiceProviderLabel(id, t) })}</Button>}</div>
         </div>
-        {id !== "system" && <VoiceTextRow title={t("settings.voice.baseUrl")} description={id === "pockettts" ? t("settings.voice.pocketUrlHelp") : t("settings.voice.baseUrlHelp")} type="url" value={String(config.baseUrl ?? "")} disabled={busy} onSave={(value) => saveProvider(id, { baseUrl: value })} />}
-        {foundVoices.length ? <VoiceSelectRow title={t("settings.voice.providerVoice", { provider: voiceProviderLabel(id, t) })} description={t("settings.voice.voiceDiscoveredForProvider", { provider: voiceProviderLabel(id, t), count: foundVoices.length })} value={String(config.voiceId ?? "")} disabled={busy} onChange={(value) => saveProvider(id, { voiceId: value })} options={[{ value: "", label: t("settings.voice.providerDefaultFor", { provider: voiceProviderLabel(id, t) }) }, ...foundVoices.map((voice) => ({ value: voice.id, label: formatVoiceOptionLabel(id, voice, t) }))]} /> : <VoiceTextRow title={t("settings.voice.providerVoice", { provider: voiceProviderLabel(id, t) })} description={voiceManualDescription(id, t)} value={String(config.voiceId ?? "")} placeholder={id === "pockettts" ? "alba" : t("settings.voice.voicePlaceholder")} disabled={busy} onSave={(value) => saveProvider(id, { voiceId: value })} />}
+        {id === "pockettts" && <div className="settings-row"><div className="settings-row-info"><strong>{t("settings.voice.pocket.localService")}</strong><small>{t("settings.voice.pocket.localServiceDescription", { version: pocketTts?.packageVersion ?? "2.1.0" })}</small></div><div className="flex gap-2 items-center">{(pocketTts?.status === "not-installed" || pocketTts?.status === "uv-missing" || pocketTts?.status === "error") && <Button variant="primary" size="compact" disabled={busy || pocketBusy} onClick={installPocketTts}>{t("settings.voice.pocket.downloadEnable")}</Button>}{pocketTts?.status === "stopped" && <Button variant="primary" size="compact" disabled={busy} onClick={startPocketTts}>{t("settings.voice.pocket.startUse")}</Button>}{pocketReady && <Button variant="secondary" size="compact" disabled={busy} onClick={stopPocketTts}>{t("settings.voice.pocket.stop")}</Button>}</div></div>}
+        {id === "pockettts" && <details className="settings-row"><summary>{t("settings.voice.pocket.advanced")}</summary><small>{t("settings.voice.pocket.managedUrl", { url: pocketTts?.baseUrl ?? "http://127.0.0.1:8000" })}</small></details>}
+        {id !== "system" && id !== "pockettts" && <VoiceTextRow title={t("settings.voice.baseUrl")} description={t("settings.voice.baseUrlHelp")} type="url" value={String(config.baseUrl ?? "")} disabled={busy} onSave={(value) => saveProvider(id, { baseUrl: value })} />}
+        {(id === "system" || displayVoices.length) ? <VoiceSelectRow title={t("settings.voice.providerVoice", { provider: voiceProviderLabel(id, t) })} description={id === "pockettts" ? t("settings.voice.pocket.voiceDescription") : t("settings.voice.voiceDiscoveredForProvider", { provider: voiceProviderLabel(id, t), count: displayVoices.length })} value={String(config.voiceId ?? "")} disabled={busy || pocketBusy} onChange={(value) => saveProvider(id, { voiceId: value })} options={[...(id === "pockettts" ? [] : [{ value: "", label: t("settings.voice.providerDefaultFor", { provider: voiceProviderLabel(id, t) }) }]), ...displayVoices.map((voice) => ({ value: voice.id, label: formatVoiceOptionLabel(id, voice, t) }))]} /> : <VoiceTextRow title={t("settings.voice.providerVoice", { provider: voiceProviderLabel(id, t) })} description={voiceManualDescription(id, t)} value={String(config.voiceId ?? "")} placeholder={t("settings.voice.voicePlaceholder")} disabled={busy} onSave={(value) => saveProvider(id, { voiceId: value })} />}
         {(id === "openai-compatible" || id === "elevenlabs") && <VoiceTextRow title={t("settings.voice.model")} description={t("settings.voice.modelDescription")} value={String(config.model ?? "")} disabled={busy} onSave={(value) => saveProvider(id, { model: value })} />}
         {secretId && <div className="settings-row"><div className="settings-row-info"><strong>{t("settings.voice.apiKey")}</strong><small>{secrets[secretId].hasKey ? t("settings.voice.apiKeyStored") : t("settings.voice.apiKeyNone")}</small></div><div className="flex gap-2 items-center"><input className="settings-select" type="password" value={keyDrafts[secretId] ?? ""} disabled={busy} placeholder={t("settings.voice.apiKeyPlaceholder")} onChange={(event) => setKeyDrafts((current) => ({ ...current, [secretId]: event.target.value }))} /><Button variant="secondary" size="compact" disabled={busy || !(keyDrafts[secretId] ?? "")} onClick={() => void run(t("settings.busy.saving"), async () => { onSecrets(await api.setVoiceSecret(secretId, keyDrafts[secretId])); setKeyDrafts((current) => ({ ...current, [secretId]: "" })); setMessage(t("settings.voice.saved")); })}>{t("settings.voice.saveKey")}</Button>{secrets[secretId].hasKey && <Button variant="secondary" size="compact" disabled={busy} onClick={() => void run(t("settings.busy.saving"), async () => { onSecrets(await api.setVoiceSecret(secretId, null)); setMessage(t("settings.voice.saved")); })}>{t("settings.voice.removeKey")}</Button>}</div></div>}
       </div>;
     })}
 
-    <div className="settings-group"><div className="settings-row"><div className="settings-row-info"><strong>{t("settings.voice.test.title")}</strong><small>{t("settings.voice.test.descriptionForProvider", { provider: voiceProviderLabel(settings.output.providerId, t) })}</small></div><div className="flex gap-2 items-center"><select className="settings-select" value={selectedPetId} disabled={busy} onChange={(event) => setTestPetId(event.target.value)}>{availablePets.map((pet) => <option key={pet.id} value={pet.id}>{pet.displayName}</option>)}</select><input className="settings-select" value={testText} maxLength={300} disabled={busy} onChange={(event) => setTestText(event.target.value)} /><Button variant="primary" size="compact" disabled={busy || !selectedPetId || !testText.trim()} onClick={() => void run(t("settings.voice.testing"), async () => { const result = await api.testVoiceSpeech({ text: testText, providerId: settings.output.providerId, petId: selectedPetId }); setMessage(result.ok ? t("settings.voice.test.success") : result.attempts.at(-1)?.message ?? t("settings.voice.test.failed")); })}>{t("settings.voice.test.button")}</Button><Button variant="secondary" size="compact" disabled={busy || !selectedPetId} onClick={() => void api.stopVoiceSpeech(selectedPetId)}>{t("settings.voice.stop")}</Button></div></div></div>
+    <div className="settings-group"><div className="settings-row"><div className="settings-row-info"><strong>{t("settings.voice.test.title")}</strong><small>{t("settings.voice.test.chooseProvider")}</small></div><div className="flex gap-2 items-center">{availablePets[0] && <span className="pill pill-slate">{availablePets[0].displayName}</span>}<input className="settings-select" value={testText} maxLength={300} disabled={busy} onChange={(event) => setTestText(event.target.value)} /><Button variant="secondary" size="compact" disabled={busy || !selectedPetId} onClick={() => void api.stopVoiceSpeech(selectedPetId)}>{t("settings.voice.stop")}</Button></div></div></div>
+    </>}
 
-    <div className="settings-group">
-      <ToggleRow title={t("settings.voice.ptt.title")} description={t("settings.voice.ptt.description")} checked={settings.listening.pushToTalkEnabled} disabled={busy} onChange={(checked) => save({ listening: { ...settings.listening, pushToTalkEnabled: checked } })} />
-      <ToggleRow title={t("settings.voice.bargeIn.title")} description={t("settings.voice.bargeIn.description")} checked={settings.listening.bargeIn} disabled={busy || !settings.listening.pushToTalkEnabled} onChange={(checked) => save({ listening: { ...settings.listening, bargeIn: checked } })} />
-      <div className="settings-row"><div className="settings-row-info"><strong>{t("settings.voice.ptt.test")}</strong><small>{listening.error ?? listening.response ?? listening.transcript ?? t("settings.voice.ptt.state", { state: listening.state })}</small></div><div className="flex gap-2 items-center"><Button variant="primary" size="compact" disabled={busy || !settings.listening.pushToTalkEnabled || !selectedPetId || listening.state === "listening"} onClick={() => void run(t("settings.voice.ptt.listening"), async () => setListening(await api.startVoicePushToTalk(selectedPetId)))}>{t("settings.voice.ptt.start")}</Button><Button variant="secondary" size="compact" disabled={busy || listening.state !== "listening"} onClick={() => void run(t("settings.voice.ptt.transcribing"), async () => setListening(await api.stopVoicePushToTalk()))}>{t("settings.voice.ptt.stop")}</Button><Button variant="secondary" size="compact" disabled={busy || listening.state === "idle"} onClick={() => void api.cancelVoiceActivity().then(setListening)}>{t("settings.voice.ptt.cancel")}</Button></div></div>
-    </div>
+    {section === "vision" && <div className="settings-group">
+      <ToggleRow title={t("settings.abilities.vision.toggle")} description={t("settings.abilities.vision.toggleDescription")} checked={vision?.enabled ?? false} disabled={busy || !vision} onChange={setVisionEnabled} />
+      <div className="settings-row"><div className="settings-row-info"><strong>{visionStatus}</strong><small>{vision?.capture.reason ?? (screenPermission?.status === "granted" ? t("settings.abilities.vision.checkReady") : t("settings.permissions.screenDescription"))}</small></div><div className="flex gap-2 items-center"><span className={vision?.state === "ready" ? "pill pill-green" : vision?.state === "blocked" || vision?.state === "error" ? "pill pill-orange" : "pill pill-slate"}>{visionStatus}</span>{screenPermission?.status !== "granted" && screenPermission?.canOpenSettings && <Button variant="primary" size="compact" disabled={busy} onClick={() => openPermissionSettings("screen-recording")}>{t("settings.permissions.openSettings")}</Button>}<Button variant="secondary" size="compact" disabled={busy} onClick={checkVision}>{t("settings.abilities.vision.checkAgain")}</Button>{offerScreenRestart && <Button variant="secondary" size="compact" disabled={busy} onClick={() => void api.restartForDesktopPermissions()}>{t("settings.permissions.restart")}</Button>}</div></div>
+      <details className="settings-row"><summary>{t("settings.abilities.vision.privacyLabel")}</summary><div className="settings-row-info"><small>{t("settings.abilities.vision.privacy")}</small><small>{vision ? t("settings.abilities.vision.storageLocation", { location: vision.storage.dir }) : t("settings.abilities.vision.location")}</small></div></details>
+      {vision?.enabled && <div className="settings-row"><div className="settings-row-info"><strong>{t("settings.abilities.vision.pause")}</strong><small>{t("settings.abilities.vision.pauseDescription")}</small></div><div className="flex gap-2 items-center">{vision.state === "paused" ? <Button variant="secondary" size="compact" disabled={busy} onClick={resumeVision}>{t("settings.abilities.vision.resume")}</Button> : <><Button variant="secondary" size="compact" disabled={busy} onClick={() => pauseVision(30)}>{t("settings.abilities.vision.pause30")}</Button><Button variant="secondary" size="compact" disabled={busy} onClick={() => pauseVision(60)}>{t("settings.abilities.vision.pause60")}</Button><Button variant="secondary" size="compact" disabled={busy} onClick={() => pauseVision(90)}>{t("settings.abilities.vision.pause90")}</Button></>}</div></div>}
+    </div>}
 
-    <div className="settings-group">
-      <div className="settings-row"><div className="settings-row-info"><strong>{t("settings.voice.wake.title")}</strong><small>{wakeHealth?.reason ?? t("settings.voice.wake.description")}</small></div><span className="pill pill-slate">{t("settings.voice.wake.unavailable")}</span></div>
-    </div>
-
-    <div className="settings-group"><div className="settings-row"><div className="settings-row-info"><strong>{t("settings.voice.petOverrides")}</strong><small>{t("settings.voice.petOverridesDescription")}</small></div></div>{availablePets.map((pet) => { const override = settings.petOverrides[pet.id] ?? {}; return <div className="settings-row" key={pet.id}><div className="settings-row-info"><strong>{pet.displayName}</strong><small>{override.providerId ? voiceProviderLabel(override.providerId, t) : t("settings.voice.inherit")}</small></div><div className="flex gap-2 items-center"><select className="settings-select" value={override.providerId ?? "inherit"} disabled={busy} onChange={(event) => savePetOverride(pet.id, { providerId: event.target.value })}><option value="inherit">{t("settings.voice.inherit")}</option>{providerIds.map((id) => <option key={id} value={id}>{voiceProviderLabel(id, t)}</option>)}</select><input className="settings-select" defaultValue={override.voiceId ?? ""} disabled={busy} placeholder={t("settings.voice.inheritVoice")} onBlur={(event) => savePetOverride(pet.id, { voiceId: event.target.value })} /><Button variant="secondary" size="compact" disabled={busy || !settings.petOverrides[pet.id]} onClick={() => { const next = { ...settings.petOverrides }; delete next[pet.id]; save({ petOverrides: next }); }}>{t("settings.voice.clearOverride")}</Button></div></div>; })}</div>
   </div>;
 }
 
-function VoiceSelectRow({ title, description, value, options, disabled, onChange }: { title: string; description: string; value: string; options: Array<{ value: string; label: string }>; disabled: boolean; onChange: (value: string) => void }) {
-  return <div className="settings-row"><div className="settings-row-info"><strong>{title}</strong><small>{description}</small></div><select className="settings-select" value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)}>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></div>;
+function AbilityDiagnosticRow({ label, ready, detail, neutral = false }: { label: string; ready: boolean; detail: string; neutral?: boolean }) {
+  const { t } = useI18n();
+  return <div className="settings-row"><div className="settings-row-info"><strong>{label}</strong><small>{detail}</small></div><span className={neutral ? "pill pill-slate" : ready ? "pill pill-green" : "pill pill-orange"}>{neutral ? "—" : ready ? t("settings.abilities.diagnostic.ready") : t("settings.abilities.diagnostic.waiting")}</span></div>;
+}
+
+function VoiceSelectRow({ title, description, value, options, disabled, onChange }: { title: string; description: string; value: string; options: Array<{ value: string; label: string; disabled?: boolean }>; disabled: boolean; onChange: (value: string) => void }) {
+  return <div className="settings-row"><div className="settings-row-info"><strong>{title}</strong><small>{description}</small></div><select className="settings-select" value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)}>{options.map((option) => <option key={option.value} value={option.value} disabled={option.disabled}>{option.label}</option>)}</select></div>;
 }
 
 function VoiceTextRow({ title, description, value, placeholder, type = "text", disabled, onSave }: { title: string; description: string; value: string; placeholder?: string; type?: string; disabled: boolean; onSave: (value: string) => void }) {
@@ -2444,8 +3026,13 @@ function IntegrationsView() {
         if (next.lastAction.ok) setMessage(next.lastAction.message);
         else setError(next.lastAction.message);
       }
+      if (action.startsWith("codex-")) {
+        const refreshed = await api.getIntegrationsState(next.selectedPetId, next.commandMode);
+        setSnapshot({ ...refreshed, lastAction: next.lastAction });
+        window.setTimeout(() => void load(refreshed.selectedPetId, refreshed.commandMode), 1_000);
+      }
     } catch (err) {
-      setError(String((err as Error)?.message ?? err));
+      setError(userFacingError(err));
     } finally {
       setBusy(null);
     }
@@ -2472,11 +3059,27 @@ function IntegrationsView() {
   const updatePath = async (key: keyof AgentSetupCommandPaths, value: string) => {
     try {
       setBusy({ label: t("integrations.busy.savingPath") });
+      setError("");
+      setMessage("");
       await api.updateIntegrationCommandPaths({ [key]: value });
       await load();
       setMessage(t("integrations.toast.pathSaved"));
     } catch (err) {
       setError(String((err as Error)?.message ?? err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const updateCodexReaction = async (key: keyof CodexReactionPreferences, value: boolean) => {
+    try {
+      setBusy({ label: t("integrations.codex.reactionsSaving") });
+      setError("");
+      const next = await api.updateCodexReactionPreferences({ [key]: value });
+      setSnapshot(next);
+      setMessage(t("integrations.codex.reactionsSaved"));
+    } catch (err) {
+      setError(userFacingError(err));
     } finally {
       setBusy(null);
     }
@@ -2695,6 +3298,16 @@ function IntegrationsView() {
                       <div><span>{t("integrations.codex.lastEvent")}</span><strong>{snapshot.codexLastEvent ? `${snapshot.codexLastEvent.lifecycle} · ${new Date(snapshot.codexLastEvent.receivedAt).toLocaleString()}` : t("integrations.codex.noEvents")}</strong></div>
                     </div>
 
+                    <div className="flex flex-col gap-2">
+                      <strong className="text-sm">{t("integrations.codex.connectionChecks")}</strong>
+                      {(snapshot.codexStatus.checks ?? []).map((check) => (
+                        <div className="flex items-start justify-between gap-3 p-3 rounded-xl bg-navy/5 border border-navy/5" key={check.id}>
+                          <div className="min-w-0"><strong className="text-sm">{check.message}</strong>{check.detail && <small className="block text-slatecopy mt-1 break-all">{check.detail}</small>}</div>
+                          <StatusPill tone={check.state === "ok" ? "green" : check.state === "waiting" ? "blue" : check.state === "unsupported" || check.state === "error" ? "red" : "orange"}>{check.state === "ok" ? t("integrations.codex.checkOk") : check.state === "waiting" ? t("integrations.codex.checkWaiting") : t("integrations.codex.checkAction")}</StatusPill>
+                        </div>
+                      ))}
+                    </div>
+
                     <div className="codex-action-bar">
                       {snapshot.codexStatus.canInstall && <Button variant="primary" icon={<InstallIcon />} disabled={isBusy} onClick={() => run(t("integrations.codex.connecting"), "codex-install")}>{busyAction === "codex-install" ? t("integrations.codex.connecting") : t("integrations.connect")}</Button>}
                       {snapshot.codexStatus.canRepair && <Button variant="warning" icon={<ReplaceIcon />} disabled={isBusy} onClick={() => run(t("integrations.codex.repairing"), "codex-repair")}>{busyAction === "codex-repair" ? t("integrations.codex.repairing") : t("integrations.repair")}</Button>}
@@ -2734,14 +3347,14 @@ function IntegrationsView() {
                   </section>
 
                   <section className="plugin-section">
-                    <div className="plugin-section-title"><small>{t("integrations.codex.capabilities")}</small><strong>{t("integrations.codex.whatThisEnables")}</strong></div>
-                    <div className="codex-capability-grid">
-                      <div className="codex-capability-card">
-                        <strong>{t("integrations.codex.activityReactions")}</strong>
-                        <p>{t("integrations.codex.activityReactionsDescription")}</p>
-                        <small>{t("integrations.codex.activityReactionsExample")}</small>
-                      </div>
-                      <div className="codex-capability-card">
+                    <div className="plugin-section-title"><small>{t("integrations.codex.capabilities")}</small><strong>{t("integrations.codex.whatThisEnables")}</strong><p>{t("integrations.codex.reactionsDescription")}</p></div>
+                    <div className="settings-group">
+                      <ToggleRow title={t("integrations.codex.reactionStarted")} description={t("integrations.codex.reactionStartedDescription")} checked={snapshot.codexReactionPreferences.taskStarted} disabled={isBusy} onChange={(value) => void updateCodexReaction("taskStarted", value)} />
+                      <ToggleRow title={t("integrations.codex.reactionWorking")} description={t("integrations.codex.reactionWorkingDescription")} checked={snapshot.codexReactionPreferences.taskWorking} disabled={isBusy} onChange={(value) => void updateCodexReaction("taskWorking", value)} />
+                      <ToggleRow title={t("integrations.codex.reactionCompleted")} description={t("integrations.codex.reactionCompletedDescription")} checked={snapshot.codexReactionPreferences.taskCompleted} disabled={isBusy} onChange={(value) => void updateCodexReaction("taskCompleted", value)} />
+                    </div>
+                    <div className="codex-capability-grid mt-4">
+                      <div className="codex-capability-card codex-capability-card-wide">
                         <strong>{t("integrations.codex.petControls")}</strong>
                         <p>{t("integrations.codex.petControlsDescription")}</p>
                         <small>{t("integrations.codex.petControlsExample")}</small>
@@ -3209,9 +3822,8 @@ function PluginsView() {
   );
 }
 
-function PetCompanionPanel({ petId, focusComposer, pushToTalkAvailable }: { petId: string; focusComposer: boolean; pushToTalkAvailable: boolean }) {
+function PetCompanionPanel({ petId }: { petId: string }) {
   const { t } = useI18n();
-  const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const [settings, setSettings] = useState<CompanionSettings | null>(null);
   const [health, setHealth] = useState<CompanionTargetHealth | null>(null);
   const [codexConnected, setCodexConnected] = useState(false);
@@ -3219,14 +3831,9 @@ function PetCompanionPanel({ petId, focusComposer, pushToTalkAvailable }: { petI
   const [profileName, setProfileName] = useState("");
   const [preferredAddress, setPreferredAddress] = useState("");
   const [goals, setGoals] = useState("");
-  const [message, setMessage] = useState("");
-  const [lastReply, setLastReply] = useState("");
   const [status, setStatus] = useState("");
   const [panelError, setPanelError] = useState("");
-  const [listening, setListening] = useState<VoiceListeningSnapshot | null>(null);
-  const [pushToTalkEnabled, setPushToTalkEnabled] = useState(false);
   const [busyAction, setBusyAction] = useState("");
-  const acknowledgedDisplayTokens = useRef(new Set<string>());
 
   const applySettings = React.useCallback((next: CompanionSettings) => {
     setSettings(next);
@@ -3236,30 +3843,15 @@ function PetCompanionPanel({ petId, focusComposer, pushToTalkAvailable }: { petI
     setGoals(next.profile.goals.join("\n"));
   }, [petId]);
 
-  const applyListeningSnapshot = React.useCallback((next: VoiceListeningSnapshot) => {
-    setListening(next);
-    if (next.response) setLastReply(next.response);
-    if (next.error) setPanelError(next.error);
-    if (next.petId !== petId || next.displayed !== false || !next.displayToken || acknowledgedDisplayTokens.current.has(next.displayToken)) return;
-    acknowledgedDisplayTokens.current.add(next.displayToken);
-    window.requestAnimationFrame(() => {
-      void api.acknowledgeCompanionDisplay(petId, next.displayToken!).catch((error) => {
-        setPanelError(String((error as Error)?.message ?? error));
-      });
-    });
-  }, [petId]);
-
   useEffect(() => {
     let active = true;
-    void Promise.all([api.getCompanionSettings(), api.getVoiceSettings(), api.getVoiceListeningState(), api.getIntegrationsState()]).then(([next, voice, nextListening, integrations]) => {
+    void Promise.all([api.getCompanionSettings(), api.getIntegrationsState()]).then(([next, integrations]) => {
       if (!active) return;
       applySettings(next);
-      setPushToTalkEnabled(voice.listening.pushToTalkEnabled);
-      applyListeningSnapshot(nextListening);
       setCodexConnected(integrations.codexStatus.state === "connected");
     }).catch((error) => { if (active) setPanelError(String((error as Error)?.message ?? error)); });
     return () => { active = false; };
-  }, [applyListeningSnapshot, applySettings]);
+  }, [applySettings]);
 
   useEffect(() => {
     if (!settings?.enabled) { setHealth(null); return; }
@@ -3270,14 +3862,6 @@ function PetCompanionPanel({ petId, focusComposer, pushToTalkAvailable }: { petI
     });
     return () => { active = false; };
   }, [settings?.enabled, settings?.target]);
-
-  useEffect(() => {
-    if (!focusComposer || !settings?.enabled) return;
-    requestAnimationFrame(() => {
-      composerRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
-      composerRef.current?.focus();
-    });
-  }, [focusComposer, settings?.enabled]);
 
   async function run(action: string, task: () => Promise<void>) {
     try {
@@ -3298,18 +3882,6 @@ function PetCompanionPanel({ petId, focusComposer, pushToTalkAvailable }: { petI
     else setSettings(next);
     setStatus(success);
   }
-
-  const pttActive = listening?.owner === "push-to-talk" && listening.petId === petId && !["idle", "complete", "cancelled", "error"].includes(listening.state);
-
-  useEffect(() => {
-    if (!pttActive) return;
-    const timer = window.setInterval(() => {
-      void api.getVoiceListeningState().then((next) => {
-        applyListeningSnapshot(next);
-      }).catch(() => undefined);
-    }, 500);
-    return () => window.clearInterval(timer);
-  }, [applyListeningSnapshot, pttActive]);
 
   return (
     <section className="companion-panel" aria-labelledby={`companion-title-${petId}`}>
@@ -3358,21 +3930,9 @@ function PetCompanionPanel({ petId, focusComposer, pushToTalkAvailable }: { petI
             <label><input type="checkbox" checked={settings.proactivity.enabled} onChange={(event) => void run("proactivity", async () => { await patchSettings({ proactivity: { enabled: event.target.checked } }, t("pets.companion.preferencesSaved")); })} /> <span><strong>{t("pets.companion.checkIns")}</strong><small>{t("pets.companion.checkInsDescription")}</small></span></label>
             <label><input type="checkbox" checked={settings.context.pluginEnabled} onChange={(event) => void run("plugin-context", async () => { await patchSettings({ context: { pluginEnabled: event.target.checked } }, t("pets.companion.preferencesSaved")); })} /> <span><strong>{t("pets.companion.pluginContext")}</strong><small>{t("pets.companion.pluginContextDescription")}</small></span></label>
             <label><input type="checkbox" disabled={!settings.context.pluginEnabled} checked={settings.context.sensitivePluginEnabled} onChange={(event) => void run("sensitive-plugin-context", async () => { await patchSettings({ context: { sensitivePluginEnabled: event.target.checked } }, t("pets.companion.preferencesSaved")); })} /> <span><strong>{t("pets.companion.sensitivePluginContext")}</strong><small>{t("pets.companion.sensitivePluginContextDescription")}</small></span></label>
-            <label><input type="checkbox" disabled checked={false} /> <span><strong>{t("pets.companion.screenContext")}</strong><small>{t("pets.companion.screenContextDescription")}</small></span></label>
-            <label><input type="checkbox" disabled defaultChecked={false} /> <span><strong>{t("pets.companion.wakeWord")}</strong><small>{t("pets.companion.wakeWordDescription")}</small></span></label>
           </div>
 
-          <div className="companion-composer">
-            <label htmlFor={`companion-message-${petId}`}>{t("pets.companion.talk")}</label>
-            <textarea ref={composerRef} id={`companion-message-${petId}`} value={message} maxLength={2000} rows={3} onChange={(event) => setMessage(event.target.value)} placeholder={t("pets.companion.messagePlaceholder")} />
-            <div className="companion-composer-actions">
-              <Button variant="primary" icon={<MessageIcon />} disabled={!!busyAction || !message.trim()} onClick={() => void run("send", async () => { const reply = await api.sendCompanionMessage({ petId, text: message, speak: false }); setLastReply(reply.text); setMessage(""); if (!reply.displayed && reply.displayToken) { await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve())); await api.acknowledgeCompanionDisplay(petId, reply.displayToken); } })}>{busyAction === "send" ? t("pets.companion.thinking") : t("pets.companion.send")}</Button>
-              {pushToTalkAvailable && (!pushToTalkEnabled ? <Button variant="secondary" disabled={!!busyAction} onClick={() => void run("enable-ptt", async () => { const next = await api.updateVoiceSettings({ listening: { pushToTalkEnabled: true } }); setPushToTalkEnabled(next.listening.pushToTalkEnabled); setStatus(t("pets.companion.pushToTalkEnabled")); })}>{t("pets.companion.enablePushToTalk")}</Button> : <Button variant={pttActive ? "warning" : "secondary"} disabled={!!busyAction} onClick={() => void run("ptt", async () => { applyListeningSnapshot(pttActive ? await api.stopVoicePushToTalk() : await api.startVoicePushToTalk(petId)); })}>{pttActive ? t("pets.companion.stopListening") : t("pets.companion.pushToTalk")}</Button>)}
-              {pttActive && <Button variant="secondary" onClick={() => void api.cancelVoiceActivity().then(applyListeningSnapshot)}>{t("common.cancel")}</Button>}
-              {busyAction === "send" && <Button variant="secondary" onClick={() => void api.cancelCompanionTurn(petId)}>{t("common.cancel")}</Button>}
-            </div>
-            {lastReply && <div className="companion-last-reply"><strong>{t("pets.companion.lastReply")}</strong><p>{lastReply}</p></div>}
-          </div>
+          <p className="companion-health-note">{t("pets.companion.voiceFirst")}</p>
 
           <div className="companion-danger-row">
             <Button variant="secondary" size="compact" disabled={!!busyAction} onClick={() => void run("clear-memory", async () => { await api.clearCompanionMemory(petId); setStatus(t("pets.companion.memoryCleared")); })}>{t("pets.companion.clearMemory")}</Button>
@@ -3389,7 +3949,6 @@ function ControlCenter() {
   const initialRoute = useMemo(() => initialControlCenterRoute(), []);
   const [currentRoute, setCurrentRoute] = useState<Route>(initialRoute.route);
   const [requestedPetId, setRequestedPetId] = useState(initialRoute.petId ?? "");
-  const [requestedPetSection, setRequestedPetSection] = useState<"companion" | "">(initialRoute.section ?? "");
   const [state, setState] = useState<StateSnapshot | null>(null);
   const [catalog, setCatalog] = useState<CatalogState | null>(null);
   const [catalogPages, setCatalogPages] = useState<Record<number, PetEntry[]>>({});
@@ -3408,7 +3967,6 @@ function ControlCenter() {
     const request = normalizeControlCenterRouteRequest(value);
     setCurrentRoute(request.route);
     setRequestedPetId(request.petId ?? "");
-    setRequestedPetSection(request.section ?? "");
     if (request.notice === "pet-unavailable") setError(t("pets.companion.petUnavailable"));
   }), []);
 
@@ -3665,7 +4223,7 @@ function ControlCenter() {
       {currentRoute === "dashboard" ? (
         <DashboardView onNavigate={setCurrentRoute} />
       ) : currentRoute === "settings" ? (
-        <SettingsView />
+        <SettingsView onNavigate={setCurrentRoute} />
       ) : currentRoute === "plugins" ? (
         <PluginsView />
       ) : currentRoute === "integrations" ? (
@@ -3870,8 +4428,8 @@ function ControlCenter() {
                   </aside>
                 </div>
 
-                {selected.installed && !selected.broken && (
-                  <PetCompanionPanel petId={selected.id} focusComposer={requestedPetSection === "companion"} pushToTalkAvailable={selected.id === defaultId} />
+                {selected.installed && !selected.broken && selected.id === defaultId && (
+                  <PetCompanionPanel petId={selected.id} />
                 )}
 
                 <div className="actions-container mt-6 flex flex-col gap-3 pet-detail-actions">

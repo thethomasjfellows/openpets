@@ -9,7 +9,7 @@ export type CompanionMemoryRole = "user" | "assistant" | "proactive";
 export type CompanionProactiveMemoryMetadata = {
   readonly candidateId: string;
   readonly dedupeKey: string;
-  readonly source: "time" | "goal" | "plugin";
+  readonly source: "time" | "goal" | "plugin" | "vision";
   readonly pluginId?: string;
 };
 
@@ -63,7 +63,7 @@ const safeEntryIdPattern = /^[A-Za-z0-9._:-]{1,120}$/;
 // durable bound must accommodate both individually bounded components.
 const safeProactiveIdentityPattern = /^[A-Za-z0-9._:-]{1,192}$/;
 const safePluginIdPattern = /^[a-z0-9][a-z0-9._-]{1,62}[a-z0-9]$/;
-const proactiveSources = new Set<CompanionProactiveMemoryMetadata["source"]>(["time", "goal", "plugin"]);
+const proactiveSources = new Set<CompanionProactiveMemoryMetadata["source"]>(["time", "goal", "plugin", "vision"]);
 
 let memoryPath: string | null = null;
 let cached: CompanionMemorySnapshot = { version: 1, entries: [] };

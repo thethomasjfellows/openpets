@@ -19,6 +19,8 @@
     "dev:desktop:plugins": "pnpm --filter @open-pets/desktop dev:plugins",
     "package:desktop:dir": "pnpm build && pnpm --filter @open-pets/desktop package:dir",
     "package:desktop": "pnpm build && pnpm --filter @open-pets/desktop package",
+    "wake:desktop:prepare": "pnpm --filter @open-pets/desktop wake:prepare",
+    "wake:desktop:smoke": "pnpm --filter @open-pets/desktop wake:smoke",
     "release:desktop": "node apps/desktop/scripts/release-local.mjs",
     "release:npm": "node scripts/release-npm.mjs",
     "plugins:locales": "node scripts/check-plugin-locales.mjs",

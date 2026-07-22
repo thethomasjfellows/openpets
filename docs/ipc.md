@@ -113,9 +113,9 @@ It uses narrow Electron IPC between the sandboxed Control Center renderer,
 | `openpets:companion-pet-settings-update` | Update the selected installed pet's bounded personality |
 | `openpets:companion-memory-clear` | Clear one pet's recent memory, or all recent memory |
 | `openpets:companion-target-health` | Probe Codex or host-AI readiness without exposing credentials |
-| `openpets:companion-send`, `companion-cancel` | Send/cancel a typed pet-scoped turn through the main-process orchestrator |
-| `openpets:voice-ptt-start` / `-stop`, `voice-activity-cancel`, `voice-listening-state-get` | Drive the shared bounded PTT/transcription path |
-| `openpets:plugin-platform-settings-*`, `plugin-platform-ai-key-*` | Configure the host-AI compatibility surface and expose key presence only |
+| `openpets:voice-wake-health`, `voice-wake-snapshot` | Report the truthful packaged wake capability and inert/armed lifecycle state without exposing raw audio |
+| `openpets:plugin-platform-settings-*` | Configure plugin-wide capability gates and expose the host-AI compatibility projection |
+| `openpets:host-ai-*` | Select the global direct provider, update one provider profile, load its model catalog, check readiness, and expose provider-scoped key presence only |
 | `openpets:codex-review-hooks` | Open an interactive Codex CLI session for user-owned hook review without approving hooks or writing trust state |
 | `openpets:codex-review-complete` | Refocus the existing Control Center after its read-only trust poll confirms approval |
 

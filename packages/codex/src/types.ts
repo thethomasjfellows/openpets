@@ -25,6 +25,13 @@ export type CodexIntegrationState = typeof codexIntegrationStates[number];
 export type CodexHookTrustState = "missing" | "waiting" | "trusted" | "modified" | "unsupported";
 export type CodexComponentState = "missing" | "current" | "modified" | "conflict" | "error";
 
+export interface CodexIntegrationCheck {
+  readonly id: "cli" | "version" | "hooks" | "hook-trust" | "mcp" | "legacy";
+  readonly state: "ok" | "needs_action" | "waiting" | "conflict" | "unsupported" | "error";
+  readonly message: string;
+  readonly detail?: string;
+}
+
 export interface CodexManagedChange {
   readonly id: string;
   readonly path: string;
@@ -47,12 +54,14 @@ export interface CodexIntegrationSnapshot {
     readonly trust: CodexHookTrustState;
     readonly path: string;
     readonly installedEvents: readonly string[];
+    readonly changedEvents?: readonly string[];
   };
   readonly mcp: {
     readonly state: CodexComponentState;
     readonly serverName: "openpets";
     readonly command?: string;
     readonly args?: readonly string[];
+    readonly message?: string;
   };
   readonly legacy: {
     readonly detected: boolean;
@@ -60,6 +69,7 @@ export interface CodexIntegrationSnapshot {
     readonly details: readonly string[];
   };
   readonly managedChanges: readonly CodexManagedChange[];
+  readonly checks: readonly CodexIntegrationCheck[];
   readonly canInstall: boolean;
   readonly canRepair: boolean;
   readonly canDisconnect: boolean;
@@ -95,4 +105,38 @@ export interface CodexActionResult {
   readonly changed: boolean;
   readonly message: string;
   readonly snapshot: CodexIntegrationSnapshot;
+}
+
+export type CodexModelInputModality = "text" | "image" | (string & {});
+
+export interface CodexReasoningEffortOption {
+  readonly value: string;
+  readonly description: string;
+}
+
+export interface CodexModelInfo {
+  readonly id: string;
+  readonly model: string;
+  readonly displayName: string;
+  readonly description: string;
+  readonly hidden: boolean;
+  readonly isDefault: boolean;
+  readonly inputModalities: readonly CodexModelInputModality[];
+  readonly defaultReasoningEffort: string;
+  readonly supportedReasoningEfforts: readonly CodexReasoningEffortOption[];
+}
+
+export interface CodexModelDiscoverySnapshot {
+  readonly checkedAt: number;
+  readonly status: "ready" | "not_detected" | "unsupported" | "error";
+  readonly models: readonly CodexModelInfo[];
+  readonly defaultModelId?: string;
+  readonly reason?: string;
+}
+
+export interface CodexModelDiscoveryOptions {
+  readonly codexCommand?: string;
+  readonly timeoutMs?: number;
+  readonly now?: () => number;
+  readonly runAppServer?: (command: string, timeoutMs: number) => Promise<unknown>;
 }

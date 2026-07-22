@@ -1,6 +1,7 @@
 import type { BrowserWindow } from "electron";
 
 import type { PluginSecretsStore } from "./plugin-secrets.js";
+import type { PocketTtsService } from "./pockettts-service.js";
 import { elevenLabsVoiceProvider } from "./voice-provider-elevenlabs.js";
 import { openAiCompatibleVoiceProvider } from "./voice-provider-openai-compatible.js";
 import { pocketTtsVoiceProvider } from "./voice-provider-pockettts.js";
@@ -22,11 +23,13 @@ export class VoiceProviderRegistry {
   readonly #listSystemVoices: (window: BrowserWindow) => Promise<VoiceInfo[]>;
   readonly #evidence = new Map<VoiceProviderId, VoiceCapabilityEvidence>();
   readonly #removeSettingsListener: () => void;
+  readonly #pocketTts?: PocketTtsService;
 
-  constructor(input: { secrets: PluginSecretsStore; getDefaultWindow(): BrowserWindow | null; listSystemVoices(window: BrowserWindow): Promise<VoiceInfo[]> }) {
+  constructor(input: { secrets: PluginSecretsStore; getDefaultWindow(): BrowserWindow | null; listSystemVoices(window: BrowserWindow): Promise<VoiceInfo[]>; pocketTts?: PocketTtsService }) {
     this.#secrets = input.secrets;
     this.#getDefaultWindow = input.getDefaultWindow;
     this.#listSystemVoices = input.listSystemVoices;
+    this.#pocketTts = input.pocketTts;
     this.#removeSettingsListener = onVoiceSettingsChanged(() => this.invalidate());
   }
 
@@ -90,7 +93,7 @@ export class VoiceProviderRegistry {
 
   #context(targetWindow?: BrowserWindow) {
     const window = targetWindow && !targetWindow.isDestroyed() ? targetWindow : this.#getDefaultWindow() ?? undefined;
-    return { settings: getVoiceSettings(), secrets: this.#secrets, targetWindow: window, listSystemVoices: this.#listSystemVoices };
+    return { settings: getVoiceSettings(), secrets: this.#secrets, targetWindow: window, listSystemVoices: this.#listSystemVoices, pocketTts: this.#pocketTts };
   }
 
   #adapter(providerId: VoiceProviderId): VoiceProviderAdapter {

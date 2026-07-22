@@ -27,6 +27,7 @@ import {
 } from "./ownership.js";
 import type {
   CodexActionResult,
+  CodexIntegrationCheck,
   CodexIntegrationOptions,
   CodexIntegrationSnapshot,
 } from "./types.js";
@@ -89,10 +90,10 @@ export async function doctorCodexIntegration(
     state = "needs_repair";
     message = mcp.message || "The OpenPets Codex integration needs repair.";
   } else if (hooks.trust !== "trusted") {
-    state = hooks.trust === "modified" ? "needs_repair" : "waiting_for_trust";
+    state = "waiting_for_trust";
     message =
       hooks.trust === "modified"
-        ? "The OpenPets Codex hooks changed after approval."
+        ? "The installed OpenPets hooks need approval again in the Codex CLI."
         : "Waiting for approval in the Codex CLI.";
   } else {
     state = "connected";
@@ -203,6 +204,14 @@ async function reconcileCodexIntegration(
     const migrated = await migrateLegacyCodexIntegration(options);
     changed = migrated.changed || changed;
     const snapshot = await doctorCodexIntegration(options);
+    if (snapshot.state !== "connected" && snapshot.state !== "waiting_for_trust") {
+      return {
+        ok: false,
+        changed,
+        message: firstUnmetCheck(snapshot)?.message ?? snapshot.message,
+        snapshot,
+      };
+    }
     return {
       ok: true,
       changed,
@@ -233,15 +242,19 @@ async function reconcileCodexIntegration(
 }
 
 function createSnapshot(
-  input: Omit<CodexIntegrationSnapshot, "managedChanges" | "canInstall" | "canRepair" | "canDisconnect" | "canRefresh"> & {
+  input: Omit<CodexIntegrationSnapshot, "checks" | "managedChanges" | "canInstall" | "canRepair" | "canDisconnect" | "canRefresh"> & {
     readonly options: CodexIntegrationOptions;
   },
 ): CodexIntegrationSnapshot {
   const { options, ...snapshot } = input;
   const hooksPresent = snapshot.hooks.state !== "missing";
   const mcpPresent = snapshot.mcp.state !== "missing";
+  const checks = buildChecks(snapshot);
+  const unmet = checks.find((check) => check.state !== "ok" && check.state !== "waiting" && check.id !== "legacy");
   return {
     ...snapshot,
+    message: snapshot.state === "needs_repair" && unmet ? unmet.message : snapshot.message,
+    checks,
     managedChanges: buildManagedChanges(options, {
       hooks: hooksPresent,
       trust: snapshot.hooks.trust === "trusted",
@@ -253,6 +266,50 @@ function createSnapshot(
     canDisconnect: hooksPresent || mcpPresent,
     canRefresh: true,
   };
+}
+
+function firstUnmetCheck(snapshot: CodexIntegrationSnapshot): CodexIntegrationCheck | undefined {
+  return snapshot.checks.find((check) => check.state !== "ok" && check.state !== "waiting" && check.id !== "legacy");
+}
+
+function buildChecks(
+  snapshot: Omit<CodexIntegrationSnapshot, "checks" | "managedChanges" | "canInstall" | "canRepair" | "canDisconnect" | "canRefresh">,
+): readonly CodexIntegrationCheck[] {
+  const checks: CodexIntegrationCheck[] = [
+    snapshot.detected
+      ? { id: "cli", state: "ok", message: "Codex CLI was detected.", ...(snapshot.location ? { detail: snapshot.location } : {}) }
+      : { id: "cli", state: "needs_action", message: "Install Codex CLI or set its command path." },
+    snapshot.supported
+      ? { id: "version", state: "ok", message: `Codex CLI ${snapshot.version ?? "version"} is supported.` }
+      : { id: "version", state: snapshot.detected ? "unsupported" : "needs_action", message: snapshot.detected ? `Codex CLI ${snapshot.version ?? "version unknown"} is not supported.` : "Codex version could not be checked." },
+  ];
+
+  if (snapshot.hooks.state === "current") {
+    checks.push({ id: "hooks", state: "ok", message: "OpenPets lifecycle hooks are installed.", detail: snapshot.hooks.path });
+  } else if (snapshot.hooks.state === "modified") {
+    const changed = snapshot.hooks.changedEvents?.join(", ");
+    checks.push({ id: "hooks", state: "needs_action", message: changed ? `OpenPets lifecycle hooks differ for: ${changed}.` : "OpenPets lifecycle hooks differ from this installation.", detail: snapshot.hooks.path });
+  } else if (snapshot.hooks.state === "error") {
+    checks.push({ id: "hooks", state: "error", message: "OpenPets could not read or verify the Codex lifecycle hooks.", detail: snapshot.hooks.path });
+  } else {
+    checks.push({ id: "hooks", state: "needs_action", message: "OpenPets lifecycle hooks are not installed.", detail: snapshot.hooks.path });
+  }
+
+  if (snapshot.hooks.trust === "trusted") checks.push({ id: "hook-trust", state: "ok", message: "Codex trusts the managed OpenPets hooks." });
+  else if (snapshot.hooks.trust === "waiting") checks.push({ id: "hook-trust", state: "waiting", message: "Approve the managed hooks in the interactive Codex CLI." });
+  else if (snapshot.hooks.trust === "modified") checks.push({ id: "hook-trust", state: "waiting", message: "Approve the current managed OpenPets hooks again in the interactive Codex CLI." });
+  else if (snapshot.hooks.trust === "unsupported") checks.push({ id: "hook-trust", state: "unsupported", message: "This Codex version does not expose compatible hook trust state." });
+  else checks.push({ id: "hook-trust", state: "needs_action", message: "Codex hook approval is not configured yet." });
+
+  if (snapshot.mcp.state === "current") checks.push({ id: "mcp", state: "ok", message: "The OpenPets MCP server is registered." });
+  else if (snapshot.mcp.state === "conflict") checks.push({ id: "mcp", state: "conflict", message: snapshot.mcp.message ?? "Another openpets MCP server conflicts with this installation." });
+  else if (snapshot.mcp.state === "error") checks.push({ id: "mcp", state: "error", message: snapshot.mcp.message ?? "OpenPets could not inspect the Codex MCP server." });
+  else checks.push({ id: "mcp", state: "needs_action", message: "The OpenPets MCP server is not registered with Codex." });
+
+  checks.push(snapshot.legacy.detected
+    ? { id: "legacy", state: "needs_action", message: "Legacy OpenPets Codex files will be removed during repair.", detail: snapshot.legacy.details.join(" · ") }
+    : { id: "legacy", state: "ok", message: "No legacy OpenPets Codex integration was found." });
+  return checks;
 }
 
 function preferredCodexCommand(options: CodexIntegrationOptions): string {

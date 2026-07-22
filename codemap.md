@@ -2,7 +2,7 @@
 
 ## Project Responsibility
 
-OpenPets is a pnpm/TypeScript monorepo for an Electron desktop companion app plus npm packages that let coding agents control animated desktop pets. The workspace provides a local IPC protocol, MCP server, CLI tooling, and editor-specific integrations for Claude Code, OpenCode, Cursor, and Pi.
+OpenPets is a pnpm/TypeScript monorepo for an Electron desktop companion app with voice-first conversations, opt-in Vision awareness, and npm packages that let coding agents control animated desktop pets. The workspace provides a local IPC protocol, MCP server, CLI tooling, and editor-specific integrations for Claude Code, OpenCode, Cursor, and Pi.
 
 ## System Entry Points
 
@@ -23,9 +23,9 @@ OpenPets is a pnpm/TypeScript monorepo for an Electron desktop companion app plu
 | Directory | Responsibility Summary | Detailed Map |
 |-----------|------------------------|--------------|
 | `apps/` | Deployable application workspace, currently the tray-first Electron desktop app that consumes shared packages, local IPC, pet windows, and desktop plugin support. | [View Map](apps/codemap.md) |
-| `apps/desktop/` | User-facing Electron companion app: tray UX, pet windows, pet installation, plugin automation/runtime, agent setup, update checks, and local IPC server. | [View Map](apps/desktop/codemap.md) |
+| `apps/desktop/` | User-facing Electron companion app: tray UX, pet windows, voice/Companion/Vision services, pet installation, plugin automation/runtime, agent setup, update checks, and local IPC server. | [View Map](apps/desktop/codemap.md) |
 | `apps/desktop/contracts/` | Desktop public-boundary contract tests for catalog fixtures, local IPC protocol behavior, and plugin manifest schema validation. | [View Map](apps/desktop/contracts/codemap.md) |
-| `apps/desktop/src/` | Main-process service layer for app lifecycle, state, tray/windows, IPC routing, lease-managed agent pets, catalog installation, SDK v3 plugin subsystem, i18n, and editor integration. | [View Map](apps/desktop/src/codemap.md) |
+| `apps/desktop/src/` | Main-process service layer for app lifecycle, state, tray/windows, IPC routing, lease-managed agent pets, voice/Companion/Vision, catalog installation, SDK v3 plugin subsystem, i18n, and editor integration. | [View Map](apps/desktop/src/codemap.md) |
 | `apps/desktop/src/i18n/` | Desktop host i18n catalogs and localized reaction speech pools. | [View Map](apps/desktop/src/i18n/codemap.md) |
 | `apps/desktop/src/i18n/locales/` | Host UI locale dictionaries keyed by BCP-47 locale. | [View Map](apps/desktop/src/i18n/locales/codemap.md) |
 | `apps/desktop/src/i18n/reactions/` | Localized pet reaction message pools. | [View Map](apps/desktop/src/i18n/reactions/codemap.md) |
@@ -63,7 +63,7 @@ OpenPets is a pnpm/TypeScript monorepo for an Electron desktop companion app plu
 
 ## Architecture Flow
 
-1. The desktop app starts `apps/desktop/src/main.ts`, initializes app state, creates tray/task windows, and starts a local IPC server.
+1. The desktop app starts `apps/desktop/src/main.ts`, initializes app, Companion, Vision, plugin, and voice services, creates tray/task windows, and starts a local IPC server.
 2. Agent integrations (`packages/claude`, `packages/codex`, `packages/opencode`, `packages/cursor`, `packages/pi`, and `packages/mcp`) configure agents or emit pet commands through `@open-pets/client`.
 3. The client discovers Unix sockets, Windows named pipes, or TCP endpoints for WSL cross-platform access.
 4. The desktop IPC server routes commands through lease-managed controllers so default and agent pets can coexist safely.

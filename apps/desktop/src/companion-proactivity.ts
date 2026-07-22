@@ -12,7 +12,7 @@ export type CompanionProactivityPolicy = {
 export type CompanionProactiveCandidate = {
   readonly id: string;
   readonly dedupeKey: string;
-  readonly source: "time" | "goal" | "plugin";
+  readonly source: "time" | "goal" | "plugin" | "vision";
   readonly earliestAt?: number;
   readonly expiresAt: number;
   readonly pluginId?: string;

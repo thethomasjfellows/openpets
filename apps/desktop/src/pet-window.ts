@@ -21,6 +21,8 @@ import { isFocusActionAvailable } from "./capabilities.js";
 import { canForwardMouseEvents as platformCanForwardMouseEvents, shouldWatchForwardedMouseEvents } from "./mouse-forwarding.js";
 import { isInQuietHours } from "./plugin-platform-settings.js";
 import { computeEffectiveWaylandBackend, shouldPetWindowBeFocusable } from "./wayland-backend.js";
+import { createVisionMenuItems } from "./vision-menu.js";
+import type { VoiceCaption } from "./voice-caption-timing.js";
 
 export interface PetWindowInteractionHooks {
   readonly onBubbleDismissed?: (dismissToken: string) => void;
@@ -67,6 +69,8 @@ export interface PetTransientDisplay {
   readonly message?: string;
   readonly reactionMessage?: string;
   readonly suppressReactionMessage?: boolean;
+  /** The caller owns speech for this bubble and does not want ordinary auto-narration. */
+  readonly suppressNarration?: boolean;
   readonly dismissToken?: string;
   /** Absolute path to a validated local image shown inside the bubble (pet.showMedia). */
   readonly mediaPath?: string;
@@ -74,6 +78,10 @@ export interface PetTransientDisplay {
   readonly displayDurationMs?: number;
   /** Validated URL opened via shell when the media bubble is clicked (pet.showMedia). */
   readonly clickUrl?: string;
+  /** Host-owned listening presentation with the red activity indicator. */
+  readonly voiceIndicator?: "listening" | "speaking";
+  /** Render a dedicated close control instead of making the whole bubble dismissible. */
+  readonly showCloseButton?: boolean;
 }
 
 /** Validated pet.showMedia request payload shared by the default/agent controllers. */
@@ -98,7 +106,7 @@ interface PetContentRender {
 const petWindowRenderCache = new WeakMap<BrowserWindow, string>();
 const petWindowNarrationKeys = new WeakMap<BrowserWindow, string>();
 const petWindowVoiceIdentity = new WeakMap<BrowserWindow, string>();
-const pendingVoicePlayback = new Map<string, { readonly senderId: number; readonly resolve: () => void; readonly reject: (error: Error) => void; readonly timer: NodeJS.Timeout }>();
+const pendingVoicePlayback = new Map<string, { readonly senderId: number; readonly resolve: () => void; readonly reject: (error: Error) => void; readonly timer: NodeJS.Timeout; readonly onStarted?: () => void; started: boolean }>();
 const pendingSystemVoiceLists = new Map<string, { readonly senderId: number; readonly resolve: (voices: Array<{ id: string; label: string; language?: string }>) => void; readonly reject: (error: Error) => void; readonly timer: NodeJS.Timeout }>();
 let voiceResultHandlersInstalled = false;
 let nextVoiceRequestId = 0;
@@ -249,8 +257,10 @@ async function buildPetContextMenuTemplate(action: { readonly label: string; rea
   if (topLevel.length > 0) template.push(...topLevel.slice(0, 8), { type: "separator" });
   if (plugins.size > 0) template.push(...[...plugins.values()].map((plugin) => ({ label: plugin.name, submenu: plugin.commands })), { type: "separator" });
   const defaultPetId = getAppStateSnapshot().preferences.defaultPetId;
+  const visionItems = createVisionMenuItems();
   template.push(
     { label: t("pet.menu.talkToPet"), click: () => openControlCenter({ route: "pets", petId: defaultPetId, section: "companion" }) },
+    ...(visionItems.length > 0 ? [...visionItems, { type: "separator" as const }] : []),
     { label: t("tray.plugins"), click: () => openControlCenter("plugins") },
     { label: t("pet.menu.openControlCenter"), click: () => openControlCenter("dashboard") },
     { label: action.label, click: action.click },
@@ -664,12 +674,16 @@ function createBasePetWindow(title: string, position: Point, focusOptions: { rea
     show: false,
     hasShadow: false,
     backgroundColor: "#00000000",
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      sandbox: true,
-      preload: join(app.getAppPath(), "pet-preload.cjs"),
-    },
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: true,
+        // The pet is intentionally never the foreground app. Keep animation,
+        // audio playback, and completion events timely while another app is
+        // focused or covering most of the display.
+        backgroundThrottling: false,
+        preload: join(app.getAppPath(), "pet-preload.cjs"),
+      },
   });
 
   petWindowFocusPolicy.set(window, focusable);
@@ -886,21 +900,21 @@ export function stopPetWindowTts(window: BrowserWindow): void {
   window.webContents.send("openpets:tts-stop");
 }
 
-export async function playPetWindowVoiceAudio(window: BrowserWindow, payload: { readonly bytes: Uint8Array; readonly mimeType: string; readonly volume: number }, generation: number): Promise<void> {
+export async function playPetWindowVoiceAudio(window: BrowserWindow, payload: { readonly bytes: Uint8Array; readonly mimeType: string; readonly volume: number }, generation: number, caption?: VoiceCaption, onStarted?: () => void): Promise<void> {
   if (window.isDestroyed()) throw new Error("Target pet was closed before voice playback.");
   if (!payload.mimeType.startsWith("audio/") && payload.mimeType !== "application/octet-stream") throw new Error("Voice provider returned an unsupported audio type.");
   const requestId = createVoiceRequestId(window, generation);
-  const completion = waitForVoicePlayback(window, requestId);
+  const completion = waitForVoicePlayback(window, requestId, onStarted);
   const dataUrl = `data:${payload.mimeType};base64,${Buffer.from(payload.bytes).toString("base64")}`;
-  window.webContents.send("openpets:voice-play-audio", { requestId, dataUrl, volume: Math.min(1, Math.max(0, payload.volume)) });
+  window.webContents.send("openpets:voice-play-audio", { requestId, dataUrl, volume: Math.min(1, Math.max(0, payload.volume)), caption });
   return completion;
 }
 
-export async function speakPetWindowVoiceTts(window: BrowserWindow, text: string, opts: { readonly voice?: string; readonly rate?: number }, generation: number): Promise<void> {
+export async function speakPetWindowVoiceTts(window: BrowserWindow, text: string, opts: { readonly voice?: string; readonly rate?: number }, generation: number, caption?: VoiceCaption, onStarted?: () => void): Promise<void> {
   if (window.isDestroyed()) throw new Error("Target pet was closed before voice playback.");
   const requestId = createVoiceRequestId(window, generation);
-  const completion = waitForVoicePlayback(window, requestId);
-  window.webContents.send("openpets:voice-system-speak", { requestId, text, voice: opts.voice, rate: opts.rate });
+  const completion = waitForVoicePlayback(window, requestId, onStarted);
+  window.webContents.send("openpets:voice-system-speak", { requestId, text, voice: opts.voice, rate: opts.rate, caption });
   return completion;
 }
 
@@ -944,20 +958,29 @@ function createVoiceRequestId(window: BrowserWindow, generation: number): string
   return `${window.webContents.id}:${generation}:${++nextVoiceRequestId}`;
 }
 
-function waitForVoicePlayback(window: BrowserWindow, requestId: string): Promise<void> {
+function waitForVoicePlayback(window: BrowserWindow, requestId: string, onStarted?: () => void): Promise<void> {
   ensureVoiceResultHandlers();
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pendingVoicePlayback.delete(requestId);
       reject(new Error("Voice playback timed out."));
     }, 120_000);
-    pendingVoicePlayback.set(requestId, { senderId: window.webContents.id, resolve, reject, timer });
+    pendingVoicePlayback.set(requestId, { senderId: window.webContents.id, resolve, reject, timer, onStarted, started: false });
   });
 }
 
 function ensureVoiceResultHandlers(): void {
   if (voiceResultHandlersInstalled) return;
   voiceResultHandlersInstalled = true;
+  ipcMain.on("openpets:voice-playback-started", (event, payload: unknown) => {
+    if (!payload || typeof payload !== "object") return;
+    const requestId = (payload as { requestId?: unknown }).requestId;
+    if (typeof requestId !== "string") return;
+    const pending = pendingVoicePlayback.get(requestId);
+    if (!pending || pending.senderId !== event.sender.id || pending.started) return;
+    pending.started = true;
+    pending.onStarted?.();
+  });
   ipcMain.on("openpets:voice-playback-finished", (event, payload: unknown) => {
     if (!payload || typeof payload !== "object") return;
     const requestId = (payload as { requestId?: unknown }).requestId;
@@ -1085,9 +1108,10 @@ async function createDefaultPetRender(paused: boolean, display: PetTransientDisp
     cacheKey: `default:builtin:${paused}:${scale}:${getActiveLocale()}`,
     bodyHtml,
     reactionState,
-    narration: createOrdinaryBubbleNarrationCandidate({
+    narration: display?.suppressNarration ? null : createOrdinaryBubbleNarrationCandidate({
       message: display?.message,
       reactionMessage: display?.reactionMessage,
+      reaction: display?.reaction,
       pluginMessage: pluginBubbles?.transient?.bubble.text,
       paused,
     }),
@@ -1168,9 +1192,10 @@ async function createInstalledPetRender(petId: string, displayName: string, paus
     cacheKey: `${cachePrefix}:${paused}:${scale}:${spritesheet.mtimeMs}:${spritesheet.size}:${getActiveLocale()}`,
     bodyHtml,
     reactionState,
-    narration: createOrdinaryBubbleNarrationCandidate({
+    narration: display?.suppressNarration ? null : createOrdinaryBubbleNarrationCandidate({
       message: display?.message,
       reactionMessage: display?.reactionMessage,
+      reaction: display?.reaction,
       pluginMessage: pluginBubbles?.transient?.bubble.text,
       paused,
     }),
@@ -1252,6 +1277,7 @@ function createPetWindowCss(paused: boolean, scale: PetScaleValue): string {
     .pet-shell { position: relative; width: ${scaledWidth}px; height: ${scaledHeight}px; display: block; opacity: var(--pet-opacity); filter: ${petShellFilter}; transition-property: opacity, filter; transition-duration: 180ms; transition-timing-function: cubic-bezier(0.2, 0, 0, 1); pointer-events: auto; -webkit-app-region: ${petDragRegion}; cursor: grab; }
     .bubble { position: absolute; left: 50%; bottom: ${bubbleBottom}px; z-index: 4; box-sizing: border-box; display: inline-flex; flex-direction: column; width: fit-content; min-width: 92px; max-width: min(220px, calc(100vw - 18px)); max-height: 128px; padding: 10px 12px; background: linear-gradient(135deg, rgba(239, 246, 255, 0.97), rgba(237, 233, 254, 0.96)); color: #172033; font: 760 11px/14px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-align: left; border: 1px solid rgba(255, 255, 255, 0.78); border-radius: 14px; box-shadow: 0 12px 24px rgba(15, 23, 42, 0.16), 0 2px 5px rgba(15, 23, 42, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.82); white-space: normal; overflow-wrap: break-word; word-break: normal; overflow: visible; pointer-events: auto; -webkit-app-region: no-drag; opacity: 1; backdrop-filter: ${bubbleBackdropFilter}; transform: translateX(-50%); transform-origin: 64% 100%; animation: bubble-in 180ms cubic-bezier(0.2, 0, 0, 1); }
     .bubble[data-dismiss-token] { cursor: pointer; }
+    .bubble[data-close-only="true"] { cursor: default; }
     .bubble::after { content: ""; position: absolute; left: 64%; bottom: -7px; width: 12px; height: 12px; background: inherit; border-right: 1px solid rgba(255, 255, 255, 0.56); border-bottom: 1px solid rgba(255, 255, 255, 0.56); border-bottom-right-radius: 3px; transform: translateX(-50%) rotate(45deg); box-shadow: 3px 3px 7px rgba(15, 23, 42, 0.08); }
     .bubble-header { display: inline-flex; align-items: center; min-width: 0; gap: 7px; color: currentColor; font: 780 11px/14px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0.01em; }
     .bubble-status-icon { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 18px; width: 18px; min-width: 18px; height: 18px; border-radius: 999px; background: #3b82f6; color: #fff; font: 900 12px/18px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-align: center; box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.28), 0 2px 7px rgba(59, 130, 246, 0.3); }
@@ -1260,6 +1286,11 @@ function createPetWindowCss(paused: boolean, scale: PetScaleValue): string {
     .bubble-status-icon svg { display: block; width: 14px; height: 14px; color: currentColor; }
     .bubble-status-icon img { display: block; width: 14px; height: 14px; object-fit: contain; }
     .bubble-status-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bubble.has-close { padding: 12px 40px 12px 14px; }
+    .bubble.has-close.is-status-only { padding: 10px 40px 10px 14px; border-radius: 18px; }
+    .bubble-close { position: absolute; right: 9px; top: 9px; z-index: 2; display: inline-grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 1px solid rgba(148, 163, 184, 0.32); border-radius: 999px; background: rgba(226, 232, 240, 0.97); color: #334155; font: 800 15px/20px Inter, ui-sans-serif, system-ui, sans-serif; box-shadow: 0 2px 6px rgba(15, 23, 42, 0.14); cursor: pointer; -webkit-app-region: no-drag; }
+    .bubble-close:hover { background: rgba(239, 68, 68, 0.14); color: #b91c1c; }
+    .bubble-close:focus-visible { outline: 2px solid rgba(239, 68, 68, 0.65); outline-offset: 1px; }
     .bubble-divider { height: 1px; width: 100%; margin: 8px 0; background: rgba(30, 58, 138, 0.12); }
     .bubble-body { min-width: 0; width: 100%; color: #172033; font: 720 10.5px/13.5px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", "Malgun Gothic", "Apple SD Gothic Neo", "PingFang SC", "PingFang TC", "Microsoft YaHei", "Microsoft JhengHei", "Noto Sans CJK JP", "Noto Sans CJK KR", "Noto Sans CJK SC", "Noto Sans CJK TC", sans-serif; }
     .bubble-text { display: -webkit-box; min-width: 0; overflow: hidden; -webkit-line-clamp: 4; -webkit-box-orient: vertical; text-wrap: normal; overflow-wrap: break-word; }
@@ -1271,6 +1302,9 @@ function createPetWindowCss(paused: boolean, scale: PetScaleValue): string {
     .bubble.is-long-message .bubble-text { -webkit-line-clamp: 6; font-size: 10px; line-height: 13px; }
     .bubble.is-very-long-message { max-width: min(220px, calc(100vw - 18px)); max-height: 156px; }
     .bubble.is-very-long-message .bubble-text { -webkit-line-clamp: 8; font-size: 9.5px; line-height: 12.5px; }
+    .bubble.is-conversation .bubble-body { font-size: 11.5px; line-height: 14.5px; }
+    .bubble.is-conversation.is-long-message .bubble-text { font-size: 10.75px; line-height: 13.75px; }
+    .bubble.is-conversation.is-very-long-message .bubble-text { font-size: 10.25px; line-height: 13.25px; }
     .bubble.is-busy .bubble-status-icon { background: #3b82f6; box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.28), 0 2px 7px rgba(59, 130, 246, 0.34); }
     .bubble.is-waiting .bubble-status-icon { background: #f59e0b; box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.28), 0 2px 7px rgba(245, 158, 11, 0.34); }
     .bubble.is-success .bubble-status-icon { background: #10b981; box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.28), 0 2px 7px rgba(16, 185, 129, 0.34); }
@@ -1281,6 +1315,10 @@ function createPetWindowCss(paused: boolean, scale: PetScaleValue): string {
     .bubble-status-icon.is-warning { background: #f59e0b; box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.28), 0 2px 7px rgba(245, 158, 11, 0.34); }
     .bubble-status-icon.is-info { background: #38bdf8; box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.28), 0 2px 7px rgba(56, 189, 248, 0.34); }
     .bubble.is-busy .bubble-status-icon::before { content: ""; position: absolute; inset: 0; width: 18px; height: 18px; background: radial-gradient(circle at 50% 50%, #fff 0 4px, transparent 4.5px); animation: status-pulse 820ms ease-in-out infinite; }
+    .bubble.is-listening .bubble-status-icon { background: #ef4444; box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.28), 0 2px 7px rgba(239, 68, 68, 0.34); }
+    .bubble.is-listening .bubble-status-icon::before { content: ""; position: absolute; inset: 0; width: 18px; height: 18px; background: radial-gradient(circle at 50% 50%, #fff 0 4px, transparent 4.5px); animation: status-pulse 820ms ease-in-out infinite; }
+    .bubble.is-speaking .bubble-status-icon { background: #f59e0b; box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.28), 0 2px 7px rgba(245, 158, 11, 0.34); }
+    .bubble.is-speaking .bubble-status-icon::before { content: ""; position: absolute; inset: 0; width: 18px; height: 18px; background: radial-gradient(circle at 50% 50%, #fff 0 4px, transparent 4.5px); animation: status-pulse 820ms ease-in-out infinite; }
     .bubble.is-waiting .bubble-status-icon::before { content: ""; position: absolute; left: 3px; top: 3px; box-sizing: border-box; width: 12px; height: 12px; border: 2px solid rgba(255, 255, 255, 0.96); border-top-color: rgba(255, 255, 255, 0.28); border-radius: 999px; }
     .bubble.is-plugin { gap: 6px; }
     .bubble.is-plugin .bubble-markdown strong { font-weight: 860; }
@@ -1572,19 +1610,25 @@ export function pluginBubblesCacheKey(pluginBubbles: PetPluginBubbles | null): s
 function createBubbleMarkup(display: PetTransientDisplay | null, paused: boolean, badgeReaction: PetStatusBadgeReaction | null, dismissToken?: string, pluginBubbles: PetPluginBubbles | null = null): string {
   if (pluginBubbles?.transient) return createPluginBubbleMarkup(pluginBubbles.transient, false);
   const suppressReactionMessage = display?.suppressReactionMessage === true;
+  const voiceIndicator = !paused ? display?.voiceIndicator : undefined;
   const text = display?.message ?? display?.reactionMessage ?? (!suppressReactionMessage && display?.reaction ? pickReactionMessage(display.reaction, Math.random, getActiveLocale()) : undefined) ?? (paused ? t("pet.paused") : "");
-  const status = !paused && !suppressReactionMessage && badgeReaction ? getStatusBadge(badgeReaction) : null;
+  const status = voiceIndicator
+    ? { className: voiceIndicator === "speaking" ? "is-speaking" : "is-listening", icon: "", label: voiceIndicator === "speaking" ? "Speaking" : "Listening" }
+    : !paused && !suppressReactionMessage && badgeReaction ? getStatusBadge(badgeReaction) : null;
   const media = !paused && display?.mediaPath ? `<img class="bubble-media-preview" src="${escapeHtml(pathToFileURL(display.mediaPath).toString())}" alt="" draggable="false">` : "";
   if (!text && !status && !media) return "";
   const isExplicitMessage = Boolean(display?.message && !display?.reactionMessage);
-  const className = getBubbleClassName(text, isExplicitMessage, status?.className) + (media ? " has-media" : "") + (media && display?.clickUrl ? " is-link" : "");
+  const showCloseButton = display?.showCloseButton === true;
+  const className = getBubbleClassName(text, isExplicitMessage, status?.className) + (voiceIndicator && text ? " is-conversation" : "") + (media ? " has-media" : "") + (media && display?.clickUrl ? " is-link" : "") + (showCloseButton ? " has-close" : "");
+  const closeLabel = voiceIndicator === "speaking" ? "Stop speaking" : "Stop listening";
+  const closeButton = showCloseButton ? `<button type="button" class="bubble-close" data-bubble-close aria-label="${closeLabel}">×</button>` : "";
   const header = status ? `<div class="bubble-header"><span class="bubble-status-icon${status.iconSvg ? " has-svg" : ""}" data-icon="${escapeHtml(status.icon ?? "")}" aria-hidden="true">${status.iconSvg ?? ""}</span><span class="bubble-status-label">${escapeHtml(status.label)}</span></div>` : "";
   const divider = status && (text || media) ? `<div class="bubble-divider" aria-hidden="true"></div>` : "";
   const body = text ? `<div class="bubble-body"><span class="bubble-text">${escapeHtml(text)}</span></div>` : "";
   // Use provided dismissToken, fallback to display's dismissToken for transient messages
   const token = dismissToken ?? display?.dismissToken;
-  const dismissAttr = token ? ` data-dismiss-token="${escapeHtml(token)}"` : "";
-  return `<div class="${className}" role="status" aria-live="polite"${dismissAttr}>${header}${divider}${media}${body}</div>`;
+  const dismissAttr = token ? ` data-dismiss-token="${escapeHtml(token)}"${showCloseButton ? " data-close-only=\"true\"" : ""}` : "";
+  return `<div class="${className}" role="status" aria-live="polite"${dismissAttr}>${closeButton}${header}${divider}${media}${body}</div>`;
 }
 
 const statusBadgeIcons = {

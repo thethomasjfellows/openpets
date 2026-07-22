@@ -9,6 +9,7 @@ import { info, openLogsFolder } from "./logger.js";
 import { shellState, togglePaused } from "./state.js";
 import { getUpdateStatus, openUpdateReleasePage } from "./update-checker.js";
 import { openControlCenterWindow } from "./windows.js";
+import { createVisionMenuItems } from "./vision-menu.js";
 
 let tray: Tray | null = null;
 
@@ -68,6 +69,7 @@ export function refreshTrayMenu(): void {
         refreshTrayMenu();
       },
     },
+    ...createVisionMenuItems({ onChanged: refreshTrayMenu }),
     { type: "separator" },
     {
       label: t("tray.managePets"),

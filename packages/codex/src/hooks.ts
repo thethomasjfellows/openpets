@@ -29,15 +29,18 @@ export async function runCodexHookFromStdin(
   if (!decision) return;
   const occurredAt = now();
   const client = createOpenPetsClient();
+  let reactionEnabled = false;
   try {
-    await client.recordIntegrationEvent?.({
+    const result = await client.recordIntegrationEvent?.({
       integrationId: "codex",
       lifecycle: decision.lifecycle,
       occurredAt,
     });
+    reactionEnabled = result?.reactionEnabled === true;
   } catch {
-    // Event observability is best effort; the reaction may still reach the app.
+    // Hooks must never block Codex when OpenPets is closed or outdated.
   }
+  if (!reactionEnabled) return;
   if (!(await shouldEmitReaction(decision.lifecycle, occurredAt))) return;
   try {
     await client.react(decision.reaction);

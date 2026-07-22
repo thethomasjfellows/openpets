@@ -9,11 +9,12 @@ import type { BrowserWindow } from "electron";
 
 import type { VoiceSynthesisRequest, VoiceSynthesisResult } from "../src/voice-provider.js";
 import type { VoiceProviderRegistry } from "../src/voice-provider-registry.js";
+import type { VoiceCaption } from "../src/voice-caption-timing.js";
 import { initializeVoiceSettings, updateVoiceSettings, type VoiceProviderId } from "../src/voice-settings.js";
 
 type PlaybackRuntime = {
   playAudio(window: BrowserWindow, payload: { readonly bytes: Uint8Array; readonly mimeType: string; readonly volume: number }, generation: number): Promise<void>;
-  speakSystem(window: BrowserWindow, text: string, opts: { readonly voice?: string; readonly rate?: number }, generation: number): Promise<void>;
+  speakSystem(window: BrowserWindow, text: string, opts: { readonly voice?: string; readonly rate?: number }, generation: number, caption?: VoiceCaption, onStarted?: () => void): Promise<void>;
   stop(window: BrowserWindow): void;
 };
 
@@ -24,8 +25,8 @@ const stubModules = new Map<string, string>([
   ["./default-pet-controller.js", `export const getDefaultPetWindowForPlugins = () => globalThis.${runtimeKey}.defaultWindow?.() ?? null;`],
   ["./logger.js", "export const debug = () => undefined; export const warn = () => undefined;"],
   ["./pet-window.js", [
-    `export const playPetWindowVoiceAudio = (...args) => globalThis.${runtimeKey}.playAudio(...args);`,
-    `export const speakPetWindowVoiceTts = (...args) => globalThis.${runtimeKey}.speakSystem(...args);`,
+    `export const playPetWindowVoiceAudio = (...args) => { args[4]?.(); return globalThis.${runtimeKey}.playAudio(...args); };`,
+    `export const speakPetWindowVoiceTts = (...args) => { args[5]?.(); return globalThis.${runtimeKey}.speakSystem(...args); };`,
     `export const stopPetWindowVoice = (...args) => globalThis.${runtimeKey}.stop(...args);`,
   ].join("\n")],
   ["./plugin-pet-registry.js", [
@@ -91,6 +92,11 @@ try {
     overlapPolicy: "queue",
   });
   await firstPlaybackStarted;
+  assert.deepEqual(output.getActivitySnapshot(), {
+    active: true,
+    activePetIds: ["pet"],
+    activeReasons: ["conversation"],
+  });
   const explicitQueued = output.speak({
     text: "  Explicit queued message  ",
     target: { kind: "window", petId: "pet", window },
@@ -125,6 +131,95 @@ try {
     { providerId: "pockettts", text: "Resolved queued message", voiceId: "initial-voice", model: "initial-model" },
   ], "queued speech keeps the normalized text and selection resolved when it was accepted");
   assert.deepEqual(playbackTexts, ["First message", "Explicit queued message", "Resolved queued message"]);
+  assert.deepEqual(output.getActivitySnapshot(), { active: false, activePetIds: [], activeReasons: [] });
+
+  let displayedCaption: VoiceCaption | undefined;
+  runtimeGlobal[runtimeKey] = {
+    async playAudio() {},
+    async speakSystem(_window, _text, _opts, _generation, caption) { displayedCaption = caption; },
+    stop() {},
+  };
+  const clockSpeech = await output.speak({
+    text: "Meet me at 10:57.",
+    target: { kind: "window", petId: "pet", window },
+    reason: "conversation",
+    requestedProviderId: "system",
+    progressiveCaption: true,
+  });
+  assert.equal(clockSpeech.ok, true);
+  assert.equal(synthesisCalls.at(-1)?.request.text, "Meet me at ten fifty-seven.", "speech providers receive pronounceable clock text");
+  assert.equal(displayedCaption?.text, "Meet me at 10:57.", "progressive captions retain the AI response exactly as displayed");
+
+  // A Settings test commonly interrupts plugin/status narration. The
+  // replacement must remain tracked after the cancelled state is removed.
+  const interruptedTexts: string[] = [];
+  let releaseInterruptedPlayback: (() => void) | undefined;
+  let markInterruptedPlaybackStarted: (() => void) | undefined;
+  const interruptedPlaybackStarted = new Promise<void>((resolve) => { markInterruptedPlaybackStarted = resolve; });
+  runtimeGlobal[runtimeKey] = {
+    async playAudio() {},
+    async speakSystem(_window, text) {
+      interruptedTexts.push(text);
+      if (text === "Long narration") {
+        markInterruptedPlaybackStarted?.();
+        await new Promise<void>((resolve) => { releaseInterruptedPlayback = resolve; });
+      }
+    },
+    stop() { releaseInterruptedPlayback?.(); },
+  };
+  const interruptOutput = new VoiceOutputService(providers);
+  const interrupted = interruptOutput.speak({
+    text: "Long narration",
+    target: { kind: "window", petId: "pet", window },
+    reason: "bubble-narration",
+    requestedProviderId: "system",
+    overlapPolicy: "interrupt",
+  });
+  await interruptedPlaybackStarted;
+  const replacement = interruptOutput.speak({
+    text: "Settings voice test",
+    target: { kind: "window", petId: "pet", window },
+    reason: "settings-test",
+    requestedProviderId: "system",
+    overlapPolicy: "interrupt",
+  });
+  assert.equal((await interrupted).ok, false);
+  assert.equal((await replacement).ok, true, "interrupting Settings speech remains the current tracked job");
+  assert.deepEqual(interruptedTexts, ["Long narration", "Settings voice test"]);
+  assert.deepEqual(interruptOutput.getActivitySnapshot(), { active: false, activePetIds: [], activeReasons: [] });
+
+  let finishProtectedTest: (() => void) | undefined;
+  let markProtectedTestStarted: (() => void) | undefined;
+  const protectedTestStarted = new Promise<void>((resolve) => { markProtectedTestStarted = resolve; });
+  runtimeGlobal[runtimeKey] = {
+    async playAudio() {},
+    async speakSystem(_window, text) {
+      if (text === "Protected Settings test") {
+        markProtectedTestStarted?.();
+        await new Promise<void>((resolve) => { finishProtectedTest = resolve; });
+      }
+    },
+    stop() {},
+  };
+  const protectedOutput = new VoiceOutputService(providers);
+  const protectedTest = protectedOutput.speak({
+    text: "Protected Settings test",
+    target: { kind: "window", petId: "pet", window },
+    reason: "settings-test",
+    requestedProviderId: "system",
+    overlapPolicy: "interrupt",
+  });
+  await protectedTestStarted;
+  const backgroundNarration = await protectedOutput.speak({
+    text: "Background status",
+    target: { kind: "window", petId: "pet", window },
+    reason: "bubble-narration",
+    requestedProviderId: "system",
+    overlapPolicy: "interrupt",
+  });
+  assert.equal(backgroundNarration.ok, false, "background narration cannot interrupt an explicit voice test");
+  finishProtectedTest?.();
+  assert.equal((await protectedTest).ok, true);
 } finally {
   delete runtimeGlobal[runtimeKey];
   rmSync(userData, { recursive: true, force: true });

@@ -104,8 +104,20 @@ workspace packages. Packages must build and pass `check`/`test` first.
 `pnpm release:desktop` (`apps/desktop/scripts/release-local.mjs`) does a
 macOS-local build + packaging and creates a GitHub draft release.
 `electron-builder` handles cross-platform packaging; bundled mode unpacks the
-integration CLIs and bundles `plugins/official` as extra resources (verified by
-the packaging contract — see [testing-and-validation.md](testing-and-validation.md)).
+integration CLIs, bundles `plugins/official`, and copies one validated
+target-specific Sherpa wake bundle outside ASAR. Native wake helpers are prepared
+on their target OS (macOS can prepare both macOS architectures); release assembly
+requires prebuilt validated Windows/Linux bundles instead of cross-packaging a
+macOS helper. Run `wake:prepare`, `wake:smoke`, build main, then
+`wake:stage` for a manual target build. Smoke evidence is hash-bound to the exact
+helper and manifest. Ordinary `package`/`package:dir` commands reject cross-target
+arguments and package only the current host/architecture (using the Windows
+`pnpm.cmd` shim when needed); the release script
+stages each explicitly attested target immediately before its build, rejects
+native evidence from different helper build inputs, and validates the resources
+actually emitted after each target's builder run. The packaging contract
+revalidates the installed bundle — see
+[testing-and-validation.md](testing-and-validation.md).
 
 ### Web catalog
 

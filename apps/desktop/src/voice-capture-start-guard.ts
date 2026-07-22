@@ -1,5 +1,5 @@
 export type VoiceCaptureStartAttempt = {
-  readonly owner: "plugin-listen" | "push-to-talk";
+  readonly owner: "plugin-listen";
   readonly petId?: string;
   cancelled: boolean;
   cancelReason: string;

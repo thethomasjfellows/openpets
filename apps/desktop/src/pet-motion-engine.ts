@@ -97,6 +97,8 @@ type MotionState = {
 
 const motionStates = new Map<string, { accessor: WindowAccessor; state: MotionState }>();
 const loopIntervalMs = 16;
+const minSetPositionCoordinate = -2_147_483_648;
+const maxSetPositionCoordinate = 2_147_483_647;
 
 // Shared ticker — one interval for all pets
 let sharedTicker: NodeJS.Timeout | null = null;
@@ -207,8 +209,7 @@ export async function motionMoveTo(petHandleId: string, accessor: WindowAccessor
     const t = easeProgress(step / steps, easing);
     const nextX = Math.round(startX + (clamped.x - startX) * t);
     const nextY = Math.round(startY + (clamped.y - startY) * t);
-    if (!Number.isFinite(nextX) || !Number.isFinite(nextY)) return;  // abort move if NaN (e.g. startX was NaN from mid-destroy getPosition)
-    live.setPosition(nextX, nextY, false);
+    if (!trySetWindowPosition(live, nextX, nextY)) return;
     await delay(durationMs / steps);
   }
 }
@@ -346,9 +347,27 @@ function tickPet(petHandleId: string, accessor: WindowAccessor, state: MotionSta
 
   if (nextX !== x || nextY !== y) {
     const clamped = clampPosition(petHandleId, { x: nextX, y: nextY });
-    if (!Number.isFinite(clamped.x) || !Number.isFinite(clamped.y)) return;  // skip write when clamp produces NaN (e.g. from NaN workArea on monitor disconnect)
-    window.setPosition(clamped.x, clamped.y, false);
+    if (!trySetWindowPosition(window, clamped.x, clamped.y)) unregisterPet(petHandleId);
   }
+}
+
+function trySetWindowPosition(window: BrowserWindow, x: number, y: number): boolean {
+  if (!isValidSetPositionCoordinate(x) || !isValidSetPositionCoordinate(y) || window.isDestroyed()) return false;
+  try {
+    window.setPosition(x, y, false);
+    return true;
+  } catch {
+    // Native windows can be destroyed or temporarily reject coordinate
+    // conversion between the liveness checks above and this write. Motion is
+    // best-effort and must never escape the shared timer as an uncaught error.
+    return false;
+  }
+}
+
+function isValidSetPositionCoordinate(value: number): boolean {
+  return Number.isInteger(value)
+    && value >= minSetPositionCoordinate
+    && value <= maxSetPositionCoordinate;
 }
 
 function delay(ms: number): Promise<void> {

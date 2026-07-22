@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-OpenPets desktop companion application. Tray-first Electron app providing animated desktop pets that react to coding agent events and can hold opt-in ambient conversations. Manages pet installations, host-owned Companion settings/memory/proactivity, the React/Tailwind Control Center, plugin automation/runtime, agent integrations (Claude Code, OpenCode, Cursor, Pi guidance), and local IPC for CLI communication.
+OpenPets desktop companion application. Tray-first Electron app providing animated desktop pets that react to coding agent events and can hold opt-in ambient conversations. Manages pet installations, host-owned Companion settings/memory/proactivity/Vision, the React/Tailwind Control Center, plugin automation/runtime, agent integrations (Claude Code, OpenCode, Cursor, Pi guidance), and local IPC for CLI communication.
 
 ## Design
 
@@ -22,13 +22,13 @@ OpenPets desktop companion application. Tray-first Electron app providing animat
   - Speech bubbles with reaction messages and status badges
   - User-configurable reaction-to-animation mapping
 - **Lease Manager**: 15s TTL leases for agent pet routing with heartbeat renewal
-- **Companion Layer**: Provider-independent per-pet personality, minimal user profile, rolling 24-hour memory, typed/PTT turns, bounded proactive check-ins, and expiring plugin context; wake listening and direct screen capture remain gated
+- **Companion Layer**: Provider-independent per-pet personality, minimal user profile, rolling 24-hour conversation memory, voice-first local wake turns, bounded proactive check-ins, expiring plugin context, and a separate opt-in Vision service with occasional screen summaries and rolling 24-hour local screenshot/summary retention; typed/PTT chat is absent and wake listening is explicit and bundle-validated
 - **Logging**: Structured logging with scopes, log rotation (2MB max), and sensitive data redaction
 - **Plugin Subsystem**: Declarative manifest plugins and JavaScript plugin hosting with permission approval, config schemas, command/status surfaces, catalog/local installs, SDK bridge quotas, storage, schedules, restricted HTTPS fetch, and safe path/ZIP/manifest validation
 
 ## Flow
 
-**Startup**: `main.ts` → `installAppLifecycle()` → `initializeAppState()` → `initializeLogger()` → `createAppTray()` → `startLocalIpcServer()` → initialize plugin service with JavaScript host/SDK bridge → optionally `showDefaultPet()`
+**Startup**: `main.ts` → `installAppLifecycle()` → initialize app/Companion/Vision stores and logging → initialize plugin and Vision services → initialize voice/Companion platform → `createAppTray()` → `startLocalIpcServer()` → optionally `showDefaultPet()`
 
 **Pet Display**: IPC Request → `local-ipc.ts` → `LeaseManager.acquire()` → `agent-pet-controller.ts` → `pet-window.ts` → HTML/CSS spritesheet animation with reaction-to-animation mapping
 
@@ -38,7 +38,7 @@ OpenPets desktop companion application. Tray-first Electron app providing animat
 
 **Control Center**: Tray route → `openControlCenterWindow(route)` → `windows.ts` loads Vite renderer and sends route events → `control-center-preload.cjs` exposes narrow page APIs → React Dashboard/Pets/Integrations/Plugins/Settings routes render snapshots and invoke actions.
 
-**Companion**: Pet details or **Talk to this pet** → Companion IPC in `windows.ts` → `companion-orchestrator.ts` builds bounded pet/profile/time/memory/plugin context → Codex CLI or host-AI target → pet bubble or Control Center display acknowledgement → optional speech and display-gated memory commit. `companion-proactive-service.ts` applies quiet-hours/activity/readiness/dedupe/cadence policy before default-pet check-ins.
+**Companion**: Voice settings, pet bubbles, wake transcripts, consented plugin context, or retained Vision summaries → `companion-orchestrator.ts` builds bounded pet/profile/time/memory/plugin/Vision context → Codex CLI or host-AI target → pet bubble display acknowledgement → optional speech and display-gated memory commit. `companion-proactive-service.ts` applies quiet-hours/activity/readiness/dedupe/cadence policy to time, goal, plugin, and Vision candidates before default-pet check-ins.
 
 **Plugins**: Control Center plugins route → `plugin-service.ts` → catalog or local manifest/entry loader → permission approval/state update → `plugin-runtime.ts` schedules declarative timers or starts `plugin-js-host.ts` → `plugin-sdk-bridge.ts` applies approved SDK calls to pet/schedule/storage/command/status/network APIs
 
@@ -59,7 +59,7 @@ OpenPets desktop companion application. Tray-first Electron app providing animat
   - Codex: `~/.codex/pets/` (local pet development)
   - IPC: Discovery file at platform-specific path, Unix socket/Windows named pipe/TCP
   - Logs: `userData/logs/openpets.log`
-- **Build**: `electron-builder` with ASAR, cross-platform (macOS/Windows/Linux)
+- **Build**: `electron-builder` with ASAR plus one target-specific validated native wake bundle outside ASAR (macOS/Windows/Linux)
 
 ## Key Files
 
@@ -71,10 +71,15 @@ OpenPets desktop companion application. Tray-first Electron app providing animat
 - `lease-manager.ts`: Pet routing lease lifecycle
 - `pet-window.ts`: Pet rendering (transparent frameless windows, CSS sprite animation, speech bubbles, status badges)
 - `companion-settings.ts`/`companion-memory.ts`: Opt-in host settings, per-pet personality, profile, and bounded rolling recent memory
-- `companion-orchestrator.ts`/`companion-context.ts`: Shared typed/PTT/proactive lifecycle, provider-neutral context, cancellation, display acknowledgement, and memory commits
+- `companion-orchestrator.ts`/`companion-context.ts`: Shared voice/proactive lifecycle, provider-neutral context, cancellation, display acknowledgement, and memory commits
 - `companion-proactive-service.ts`/`companion-proactivity.ts`: Time expression plus policy-limited time, goal, and plugin check-ins
 - `companion-contributions.ts`: Consent- and quota-gated process-local facts/opportunities from approved plugins
-- `host-ai-settings.ts`/`host-ai-gateway.ts`: Host-owned OpenAI/Anthropic/Ollama settings, health, inference, streaming, and transcription
+- `host-ai-settings.ts`/`host-ai-gateway.ts`: Host-owned direct OpenAI/Anthropic/Ollama Brain settings, health, text inference, and image inference
+- `codex-ai-brain.ts`/`codex-command.ts`: Preferred Codex CLI resolution, official model/reasoning discovery, and ephemeral Vision image analysis
+- `voice-transcription-settings.ts`/`voice-transcription-router.ts`/`voice-local-transcription.ts`/`voice-openai-transcription.ts`: Listening-owned finite local-or-OpenAI speech recognition, separate from the global conversation Brain; the local path manages an explicit, checksum-verified Sherpa Whisper model download
+- `desktop-permissions.ts`/`desktop-permissions-electron.ts`: macOS microphone/screen permission state and request/settings plus guarded relaunch/quit recovery workflow
+- `voice-wake-sherpa-manifest.ts`/`voice-wake-helper-wire.ts`/`voice-wake-sherpa-runtime.ts`: Manifest v2 target/provenance validation, bounded NDJSON/f32le protocol with up to fifteen wake text alternatives, runtime-derived availability, and isolated helper lifecycle
+- `wake-helper/`: C++20 Sherpa KWS/Silero VAD plus one-shot Whisper transcription helper, pinned dependency/model lock, target bundle assembler, real-model smoke tests, staged packaging input, legal notices, and boundary docs
 - `default-pet-controller.ts`/`agent-pet-controller.ts`: Pet visibility/state management with transient displays; `reclampAllLivePetWindows()` re-clamps all live pet windows on topology changes
 - `pet-roaming-controller.ts`: Host-side roaming orchestrator — registers every live pet (default + agent) with the motion engine and applies the active physics configuration (gravity + bounce). Unregisters before window destroy to prevent the shared ticker from touching closed windows.
 - `pet-motion-engine.ts`: Shared-ticker motion engine (~60 fps) — `Map<petHandleId, MotionState>`, single `setInterval` for all pets, sub-pixel fractional accumulators, bottom-center gravity-floor anchor, `registerPet`/`unregisterPet` seams, sole continuous position writer.
@@ -99,7 +104,7 @@ OpenPets desktop companion application. Tray-first Electron app providing animat
 - `logger.ts`: Structured logging with scopes (app, companion, ipc, lease, pet, plugin, state, tray, ui)
 - `reaction-animation-mapping.ts`: Reaction-to-animation state mapping with user overrides
 - `reaction-messages.ts`: Message pools for each reaction type
-- `control-center-preload.cjs`/`pet-preload.cjs`/`plugin-sdk-preload.cjs`: Narrow contextBridge APIs for the Control Center, pet windows, and plugin SDK host; the legacy `preload.cjs` task-window bridge and `plugins-window.ts` UI have been removed
+- `control-center-preload.cjs`/`voice-capture.html`/`voice-capture-preload.cjs`/`pet-preload.cjs`/`plugin-sdk-preload.cjs`: Narrow Control Center, trustworthy-origin sandboxed PCM capture, pet-window, and plugin-host boundaries; the legacy `preload.cjs` task-window bridge and `plugins-window.ts` UI have been removed
 - `electron-builder.yml`: Packaging configuration
 - `scripts/release-local.mjs`: macOS-local release automation with GitHub draft creation
 - `contracts/catalog-fixture.contract.ts`: Catalog V2 validation contract tests against fixture data
@@ -108,7 +113,7 @@ OpenPets desktop companion application. Tray-first Electron app providing animat
 
 ## Test Structure
 
-- **Behavior tests** (`tests/*.test.ts`): Unit tests for lease manager (incl. PID liveness + pool toggle), state management, version checking, ZIP safety, Codex pets, Claude memory, reaction animation mapping, display geometry helpers (`display.test.ts`), pet motion-engine clamping and shared-ticker (`pet-motion-engine-clamp.test.ts`, `pet-motion-engine-shared-ticker.test.ts`), gravity seam (`pet-motion-engine-gravity-seam.test.ts`), single-writer invariant (`pet-motion-engine-single-writer.test.ts`), roaming controller (`pet-roaming-controller.test.ts`), and pool toggle (`pool-toggle.test.ts`). Compiled to `.test-dist/tests/`.
+- **Behavior tests** (`tests/*.test.ts`): Unit tests for lease manager, state, packages, pets/motion, Companion/voice flows, one-owner capture, wake activation/coordinator behavior, Sherpa bundle validation, and fake helper process lifecycle/backpressure. Compiled to `.test-dist/tests/`.
 - **Contract tests** (`contracts/*.contract.ts`): Public API boundary validation for catalog fixtures, IPC protocol, and plugin manifest schema. Compiled to `.test-dist/contracts/`.
-- **Runtime checks** (`src/check-*.ts`): Remaining runtime validation checks compiled to `dist/`.
+- **Runtime checks** (`src/check-*.ts`): Remaining runtime validation checks compiled to `dist/`; the packaging contract requires the staged resource map and revalidates the installed current-target Sherpa bundle.
 - **Test runner** (`scripts/run-tests.mjs`): Refreshes production main-process output, then orchestrates preload syntax checks → test compilation → behavior tests → contract tests → dist checks.

@@ -108,19 +108,24 @@ files directly.
 - **Detection and status:** the card reports the detected Codex version and
   executable, connection state, hook trust, MCP ownership, last sanitized event,
   and every managed path/entry. The current adapter is contract-gated to the
-  verified Codex `0.144.x` hook/config surface; other versions show Unsupported
-  instead of guessing.
-- **Activity reactions:** managed entries in `~/.codex/hooks.json` automatically
-  move the pet through thinking, working, editing, testing, waiting, success,
-  and error states as Codex works. `UserPromptSubmit`, `PreToolUse`,
+  verified Codex `0.144+` hook/config surface within the current `0.x` line;
+  older and future-major versions show Unsupported instead of guessing.
+- **Activity reactions:** the Codex integration card separately controls task
+  start, in-progress, and task-completed pet reactions. New installs enable only
+  completion (success or error), keeping the pet quiet while Codex starts and
+  works unless the user opts into those updates. Managed entries in
+  `~/.codex/hooks.json` still report thinking, working, editing, testing,
+  waiting, success, and error states. The desktop returns the applicable saved
+  preference with each sanitized lifecycle event, and the hook sends a pet
+  reaction only when that stage is enabled. `UserPromptSubmit`, `PreToolUse`,
   `PermissionRequest`, `PostToolUse`, `SubagentStop`, and `Stop` provide the
   lifecycle signals. Raw prompt, tool input, output, paths, and secrets are never
   persisted or sent as event metadata.
 - **Pet controls:** the same Connect transaction registers the bundled
   `openpets` MCP server. Users can ask Codex to make the pet react, say a short
   message, or show a local image through `openpets_react`, `openpets_say`, and
-  `openpets_show_media`. There is intentionally no second toggle: lifecycle
-  reactions and intentional MCP controls are one connection.
+  `openpets_show_media`. These intentional MCP controls remain available when
+  any or all automatic lifecycle reaction stages are disabled.
 - **Trust:** OpenPets writes hooks but never self-approves them. When approval is
   pending, **Review in Codex** opens an interactive Codex CLI session in the
   user's terminal. The user approves the six OpenPets commands ending in
@@ -135,7 +140,9 @@ files directly.
   read-only trust result, refocuses the Control Center, and changes to Connected
   as soon as approval completes. OpenPets reads the resulting `hooks.state`
   hashes but never writes them, because an installer must not approve its own
-  command hooks.
+  command hooks. A current hook definition whose earlier approval hash is stale
+  is classified as **Waiting for approval**, not **Needs repair**: rewriting the
+  same hooks cannot repair user-owned trust and previously caused a repair loop.
 - **Ownership and repair:** hooks are marker-owned and merged without replacing
   unrelated entries; MCP removal refuses foreign entries; writes are backed up
   and rolled back if verification fails. Install/Repair first verifies the new
@@ -218,10 +225,11 @@ prompt/assistant/tool/command text, paths, URLs, or secrets.
 
 Companion Conversations can use Codex CLI to generate ordinary pet conversation,
 but provider selection remains separate from the coding-agent connection above.
-The Codex CLI option is always visible in Companion settings and is disabled with
-“Connect Codex in Integrations” until the first-class integration reports
-Connected. Selecting it does not install or modify hooks/MCP, nor does connecting
-the integration automatically make Codex the pet's brain.
+The Codex CLI option is always visible in AI Brain settings. A detected, supported
+CLI can power conversation without requiring OpenPets reaction hooks or MCP to be
+installed or trusted; those Integration components remain responsible only for
+coding-agent reactions and explicit pet controls. Selecting Codex as the brain
+does not install or modify hooks/MCP.
 
 `CodexCompanionTarget` wraps the host's existing cancellable
 `CodexConversationTarget`, probes `codex --version`, `codex exec --help`, and
@@ -229,6 +237,33 @@ resume support, and requires the structured `codex exec --json` contract. Each
 pet has its own runtime session UUID; changing provider or cancelling a turn
 aborts the child process. If a resumed session has gone stale, the orchestrator
 retries the same bounded prompt once without that session.
+Pet turns use Codex's official `--ignore-user-config` mode, disable plugins and
+shell tooling, ignore user rules, and force a read-only sandbox. Login is still
+shared, but the pet cannot inherit the user's MCP servers, plugin skills, coding
+instructions, or write-capable agent environment. Every target also runs from a
+dedicated empty, user-private temporary workspace instead of the user's home or
+an active project, and removes that workspace when the target shuts down. Child
+processes receive an allowlisted launch/login environment (home, path, locale,
+temporary-directory, platform profile paths, and an existing `CODEX_HOME`), not
+the desktop process's API keys, plugin tokens, MCP variables, or unrelated
+secrets. When the selected Codex command is an absolute path, its containing
+directory is prepended to that isolated PATH so packaged GUI launches can also
+resolve the CLI's local `node` shebang interpreter. Image turns terminate the
+CLI's variadic `--image` arguments before the prompt so Vision never mistakes
+the prompt for another image filename or waits on closed stdin.
+
+AI Brain model choices come from the installed CLI's official app-server
+`model/list` response rather than a hand-maintained list or free-text field.
+Model discovery uses the same allowlisted child environment as conversation
+turns, including prepending an absolute Codex command's directory to `PATH`, so
+an Applications-launched GUI can resolve Codex's `env node` shebang just as a
+terminal launch can.
+OpenPets preserves the CLI's default model option, constrains reasoning effort to
+the selected model's advertised values, resolves catalog IDs to the executable
+model name returned by Codex, and marks text-only models. When Codex is
+the global brain, built-in Vision uses `codex exec --image` with an ephemeral,
+read-only run and a securely deleted temporary screenshot; it does not pass
+through Ollama or the direct API Brain gateway.
 
 OpenPets constructs the prompt before Codex sees it from the selected pet's
 personality, the explicit minimal user profile, local time/activity hints,
@@ -236,7 +271,21 @@ roughly 24 hours of pet-scoped recent memory, and separately consented plugin
 facts. The host displays and records the response. Therefore switching between
 Codex CLI and the app's Anthropic/OpenAI/Ollama-compatible host-AI target does
 not switch personality, profile, memory, voice, plugin authority, or proactive
-policy. Wake-word activation is also unrelated and remains packaging-gated.
+policy. Wake activation is also unrelated; it depends on explicit user consent
+and a healthy validated local bundle. Microphone audio never goes to Codex CLI:
+local wake detection identifies the phrase, the selected Listening provider
+(recommended local Sherpa-ONNX or optional OpenAI Audio Transcriptions) converts
+only the bounded command to text, and that text is sent to the selected Brain.
+
+The isolation above is intentional even when the user's normal Codex setup has
+MCP servers. A Companion turn does not inherit global MCP servers, rules,
+plugins, shell access, or project credentials. Instead, an installed OpenPets
+plugin can request the sensitive `companion:context` permission and, after the
+separate host consent switches are enabled, contribute bounded expiring facts
+or opportunities. Those host-mediated contributions are included for whichever
+Brain is active, including Codex. A future Screenpipe plugin therefore supplies
+approved screen context through that contract; installing Codex does not grant
+Screenpipe or any other plugin blanket access to the user's full Codex toolchain.
 
 ## The CLI — `@open-pets/cli`
 

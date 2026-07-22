@@ -1,6 +1,7 @@
 import type { BrowserWindow } from "electron";
 
 import type { PluginSecretsStore } from "./plugin-secrets.js";
+import type { PocketTtsService } from "./pockettts-service.js";
 import type { VoiceProviderId, VoiceSettings } from "./voice-settings.js";
 
 export const maxVoiceAudioBytes = 10 * 1024 * 1024;
@@ -32,6 +33,7 @@ export type VoiceProviderContext = {
   readonly targetWindow?: BrowserWindow;
   readonly fetchImpl?: typeof fetch;
   readonly listSystemVoices?: (window: BrowserWindow) => Promise<VoiceInfo[]>;
+  readonly pocketTts?: Pick<PocketTtsService, "snapshot" | "listVoices">;
 };
 
 export type VoiceSynthesisRequest = {
@@ -87,7 +89,34 @@ export async function readBoundedAudioResponse(response: Response): Promise<{ by
     bytes.set(chunk, offset);
     offset += chunk.byteLength;
   }
+  finalizeWaveHeader(bytes);
   return { bytes, mimeType };
+}
+
+/**
+ * Streaming WAV servers commonly write sentinel RIFF/data sizes because the
+ * final length is unknown when headers are sent. OpenPets has already buffered
+ * and bounded the full response, so replace those placeholders with the real
+ * lengths before Chromium playback; otherwise the audio element may never end.
+ */
+function finalizeWaveHeader(bytes: Uint8Array): void {
+  if (bytes.byteLength < 20) return;
+  const fourCc = (offset: number) => String.fromCharCode(bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]);
+  if (fourCc(0) !== "RIFF" || fourCc(8) !== "WAVE") return;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  view.setUint32(4, bytes.byteLength - 8, true);
+  let offset = 12;
+  while (offset + 8 <= bytes.byteLength) {
+    const chunkId = fourCc(offset);
+    if (chunkId === "data") {
+      view.setUint32(offset + 4, bytes.byteLength - offset - 8, true);
+      return;
+    }
+    const chunkBytes = view.getUint32(offset + 4, true);
+    const next = offset + 8 + chunkBytes + (chunkBytes % 2);
+    if (next <= offset || next > bytes.byteLength) return;
+    offset = next;
+  }
 }
 
 export function sanitizeProviderError(error: unknown): string {

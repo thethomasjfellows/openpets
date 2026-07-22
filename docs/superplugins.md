@@ -41,7 +41,11 @@ line, force a check-in, select a provider, or add durable/core memory.
 This keeps habits, reminders, focus, calendars, and future screen awareness out
 of the core app while still letting the pet feel informed. Normal and sensitive
 plugin context have separate consent gates. Screen awareness remains a future
-explicit plugin boundary; the current reserved switch collects nothing.
+explicit plugin boundary; the current reserved switch collects nothing. A
+future Screenpipe plugin may contribute bounded, expiring observations through
+`companion:context` after sensitive-context consent, but does not inherit the
+user's Codex MCP servers or become a callable Codex tool merely because Codex is
+the selected Brain.
 
 Focus Buddy is the pilot for this contract. An active, unpaused focus session
 offers one low-urgency mid-session opportunity after a delay, with session-

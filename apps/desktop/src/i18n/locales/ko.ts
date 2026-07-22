@@ -194,7 +194,7 @@ export const ko: Partial<Messages> = {
   "settings.general.eyebrow": "환경",
   "settings.general.title": "일반 설정",
   "settings.general.showOnLaunch.title": "실행 시 펫 표시",
-  "settings.general.showOnLaunch.description": "OpenPets를 트레이에 유지하되 요청하기 전까지 펫을 숨깁니다.",
+    "settings.general.showOnLaunch.description": "OpenPets가 시작될 때마다 기본 펫을 자동으로 표시합니다.",
   "settings.general.launchAtLogin.title": "로그인 시 실행",
   "settings.general.launchAtLogin.supported": "컴퓨터가 시작될 때 OpenPets를 자동으로 실행합니다.",
   "settings.general.launchAtLogin.unsupported": "이 플랫폼에서는 지원되지 않습니다.",

@@ -106,6 +106,22 @@ assert.equal(evaluateCompanionProactivity({
   history: [delivered({ dedupeKey: "daily", source: "plugin", pluginId: "focus-buddy", displayedAt: now - 4 * 60 * 60_000 })],
 }).reason, "eligible", "plugin dedupe keys are scoped to their source plugin");
 
+const visionCandidate = {
+  ...base,
+  candidate: {
+    id: "vision-one",
+    dedupeKey: "vision:one",
+    source: "vision" as const,
+    expiresAt: now + 60_000,
+  },
+};
+assert.equal(evaluateCompanionProactivity(visionCandidate).reason, "eligible");
+assert.equal(evaluateCompanionProactivity({ ...visionCandidate, inQuietHours: true }).reason, "quiet-hours");
+assert.equal(evaluateCompanionProactivity({
+  ...visionCandidate,
+  history: [delivered({ dedupeKey: "vision:one", source: "vision", displayedAt: now - 1_000 })],
+}).reason, "duplicate");
+
 // Contract: restart hydration retains exact dedupe/source/plugin accounting,
 // while legacy proactive memory continues to count toward general spacing.
 assert.deepEqual(companionProactiveDeliveryFromMemoryEntry({

@@ -73,7 +73,14 @@ export interface OpenPetsClient {
   react(reaction: OpenPetsReaction, options?: { readonly leaseId?: string }): Promise<unknown>;
   say(message: string, options?: { readonly reaction?: OpenPetsReaction; readonly leaseId?: string }): Promise<unknown>;
   showMedia(path: string, options?: { readonly message?: string; readonly reaction?: OpenPetsReaction; readonly durationMs?: number; readonly clickUrl?: string; readonly leaseId?: string }): Promise<unknown>;
-  recordIntegrationEvent?(event: { readonly integrationId: "codex"; readonly lifecycle: OpenPetsIntegrationLifecycle; readonly occurredAt: number }): Promise<unknown>;
+  recordIntegrationEvent?(event: { readonly integrationId: "codex"; readonly lifecycle: OpenPetsIntegrationLifecycle; readonly occurredAt: number }): Promise<OpenPetsIntegrationEventResult>;
+}
+
+export interface OpenPetsIntegrationEventResult {
+  readonly ok: true;
+  readonly integrationId: "codex";
+  readonly lifecycle: OpenPetsIntegrationLifecycle;
+  readonly reactionEnabled: boolean;
 }
 
 export function createOpenPetsClient(options: OpenPetsClientOptions = {}): OpenPetsClient {
@@ -120,15 +127,24 @@ export function createOpenPetsClient(options: OpenPetsClientOptions = {}): OpenP
       }
       return sendDiscoveredRequest("pet.showMedia", { path: trimmedPath, message: mediaOptions?.message, reaction: mediaOptions?.reaction === undefined ? undefined : validateReaction(mediaOptions.reaction), durationMs: mediaOptions?.durationMs, clickUrl: mediaOptions?.clickUrl, leaseId: mediaOptions?.leaseId }, options);
     },
-    recordIntegrationEvent: (event) => {
+    recordIntegrationEvent: async (event) => {
       if (event.integrationId !== "codex" || !Number.isFinite(event.occurredAt)) {
         throw new OpenPetsClientError("invalid_integration_event", "Invalid OpenPets integration event.");
       }
-      return sendDiscoveredRequest("integration.event", {
+      const result = await sendDiscoveredRequest("integration.event", {
         integrationId: "codex",
         lifecycle: validateIntegrationLifecycle(event.lifecycle),
         occurredAt: event.occurredAt,
       }, options);
+      if (!isRecord(result) || result.ok !== true || result.integrationId !== "codex" || result.lifecycle !== event.lifecycle || typeof result.reactionEnabled !== "boolean") {
+        throw new OpenPetsClientError("invalid_response", "OpenPets integration event response is invalid.");
+      }
+      return {
+        ok: true,
+        integrationId: "codex",
+        lifecycle: event.lifecycle,
+        reactionEnabled: result.reactionEnabled,
+      };
     },
   };
 }

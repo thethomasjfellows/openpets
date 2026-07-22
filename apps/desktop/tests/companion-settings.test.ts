@@ -23,6 +23,7 @@ const normalized = normalizeCompanionSettings({
   consentVersion: 0,
   enabled: true,
   target: "arbitrary-provider",
+  codex: { model: `  ${"m".repeat(200)}  `, reasoningEffort: `  ${"e".repeat(80)}  ` },
   profile: {
     name: `  ${"n".repeat(200)}  `,
     preferredAddress: 42,
@@ -37,6 +38,8 @@ const normalized = normalizeCompanionSettings({
 });
 assert.equal(normalized.enabled, false);
 assert.equal(normalized.target, "codex");
+assert.equal(normalized.codex.model.length, 120);
+assert.equal(normalized.codex.reasoningEffort.length, 40);
 assert.equal(normalized.profile.name.length, 120);
 assert.equal(normalized.profile.preferredAddress, "");
 assert.equal(normalized.profile.goals.length, maxCompanionGoals);
@@ -44,6 +47,7 @@ assert.equal(normalized.pets.pedra?.personality.length, maxCompanionPersonalityC
 assert.equal(normalized.pets["../../unsafe"], undefined);
 assert.equal(normalized.proactivity.frequency, "sometimes");
 assert.equal(normalized.context.screenEnabled, false);
+assert.equal(normalized.wake.followUpEnabled, true, "follow-up listening is the forward default for older settings files");
 
 const root = mkdtempSync(join(tmpdir(), "openpets-companion-settings-"));
 try {
@@ -66,6 +70,7 @@ try {
   assert.deepEqual(firstEnable.proactivity, { enabled: true, frequency: "sometimes" });
   assert.deepEqual(firstEnable.context, { pluginEnabled: false, sensitivePluginEnabled: false, screenEnabled: false });
   assert.equal(firstEnable.wake.enabled, false);
+  assert.equal(firstEnable.wake.followUpEnabled, true);
   assert.equal(firstEnable.profile.name, "Thomas");
   assert.equal(firstEnable.target, "host-ai");
   assert.equal(firstEnable.pets.pedra?.personality, "Curious, warm, and gently opinionated.");
@@ -81,14 +86,15 @@ try {
     memory: { enabled: false },
     proactivity: { enabled: true, frequency: "rarely" },
     context: { pluginEnabled: true, screenEnabled: true },
-    wake: { enabled: true },
+    wake: { enabled: true, followUpEnabled: false },
   });
   const reenabled = enableCompanion();
   assert.equal(reenabled.memory.enabled, false);
   assert.deepEqual(reenabled.proactivity, { enabled: true, frequency: "rarely" });
   assert.equal(reenabled.context.pluginEnabled, true);
   assert.equal(reenabled.context.screenEnabled, false);
-  assert.equal(reenabled.wake.enabled, true);
+  assert.equal(reenabled.wake.enabled, true, "explicit wake preference survives temporary runtime unavailability");
+  assert.equal(reenabled.wake.followUpEnabled, false, "follow-up preference survives disable and re-enable");
 
   removeCompanionPetSettings("pedra");
   assert.equal(getCompanionSettings().pets.pedra, undefined);

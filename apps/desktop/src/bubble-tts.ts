@@ -1,3 +1,5 @@
+import type { OpenPetsReaction } from "./local-ipc-protocol.js";
+
 export type BubbleNarrationCandidate = {
   readonly text: string;
   readonly key: string;
@@ -13,15 +15,22 @@ export type BubbleNarrationDecision = {
 export function createOrdinaryBubbleNarrationCandidate(input: {
   readonly message?: string;
   readonly reactionMessage?: string;
+  readonly reaction?: OpenPetsReaction;
   readonly pluginMessage?: string;
   readonly paused: boolean;
 }): BubbleNarrationCandidate | null {
   if (input.paused) return null;
   const pluginMessage = normalizeNarrationText(input.pluginMessage);
   const message = normalizeNarrationText(input.message);
-  const reactionMessage = normalizeNarrationText(input.reactionMessage);
+  const reactionMessage = shouldNarrateAutomaticReaction(input.reaction)
+    ? normalizeNarrationText(input.reactionMessage)
+    : "";
   const text = pluginMessage || message || reactionMessage;
   return text ? { text, key: text } : null;
+}
+
+function shouldNarrateAutomaticReaction(reaction: OpenPetsReaction | undefined): boolean {
+  return reaction === "success" || reaction === "error" || reaction === "celebrating" || reaction === "waving" || reaction === "running";
 }
 
 /**

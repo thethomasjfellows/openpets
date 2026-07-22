@@ -19,6 +19,7 @@ export type CompanionSettings = {
   readonly consentVersion: 0 | 1;
   readonly enabled: boolean;
   readonly target: CompanionTargetId;
+  readonly codex: { readonly model: string; readonly reasoningEffort: string };
   readonly profile: CompanionProfile;
   readonly pets: Readonly<Record<string, CompanionPetSettings>>;
   readonly memory: { readonly enabled: boolean };
@@ -28,11 +29,12 @@ export type CompanionSettings = {
     readonly sensitivePluginEnabled: boolean;
     readonly screenEnabled: boolean;
   };
-  readonly wake: { readonly enabled: boolean };
+  readonly wake: { readonly enabled: boolean; readonly followUpEnabled: boolean };
 };
 
 export type CompanionSettingsPatch = {
   readonly target?: CompanionTargetId;
+  readonly codex?: { readonly model?: string; readonly reasoningEffort?: string };
   readonly profile?: Partial<CompanionProfile>;
   readonly memory?: { readonly enabled?: boolean };
   readonly proactivity?: { readonly enabled?: boolean; readonly frequency?: CompanionFrequency };
@@ -41,7 +43,7 @@ export type CompanionSettingsPatch = {
     readonly sensitivePluginEnabled?: boolean;
     readonly screenEnabled?: boolean;
   };
-  readonly wake?: { readonly enabled?: boolean };
+  readonly wake?: { readonly enabled?: boolean; readonly followUpEnabled?: boolean };
 };
 
 export const maxCompanionGoals = 5;
@@ -54,12 +56,13 @@ export const defaultCompanionSettings: CompanionSettings = {
   consentVersion: 0,
   enabled: false,
   target: "codex",
+  codex: { model: "", reasoningEffort: "" },
   profile: { name: "", preferredAddress: "", goals: [] },
   pets: {},
   memory: { enabled: false },
   proactivity: { enabled: false, frequency: "sometimes" },
   context: { pluginEnabled: false, sensitivePluginEnabled: false, screenEnabled: false },
-  wake: { enabled: false },
+  wake: { enabled: false, followUpEnabled: true },
 };
 
 export const companionSettingsFileName = "openpets-companion-settings.json";
@@ -97,7 +100,7 @@ export function enableCompanion(): CompanionSettings {
       memory: { enabled: true },
       proactivity: { enabled: true, frequency: "sometimes" },
       context: { pluginEnabled: false, sensitivePluginEnabled: false, screenEnabled: false },
-      wake: { enabled: false },
+      wake: { enabled: false, followUpEnabled: cached.wake.followUpEnabled },
     })
     : normalizeCompanionSettings({ ...cached, enabled: true });
   return commitSettings(next);
@@ -112,6 +115,7 @@ export function updateCompanionSettings(patch: unknown): CompanionSettings {
   if (!isRecord(patch)) throw new Error("Invalid companion settings patch.");
   const next: Record<string, unknown> = { ...cached };
   if ("target" in patch) next.target = patch.target;
+  if (isRecord(patch.codex)) next.codex = { ...cached.codex, ...patch.codex };
   if (isRecord(patch.profile)) next.profile = { ...cached.profile, ...patch.profile };
   if (isRecord(patch.memory)) next.memory = { ...cached.memory, ...patch.memory };
   if (isRecord(patch.proactivity)) next.proactivity = { ...cached.proactivity, ...patch.proactivity };
@@ -151,6 +155,7 @@ export function normalizeCompanionSettings(value: unknown): CompanionSettings {
   const proactivity = isRecord(raw.proactivity) ? raw.proactivity : {};
   const context = isRecord(raw.context) ? raw.context : {};
   const wake = isRecord(raw.wake) ? raw.wake : {};
+  const codex = isRecord(raw.codex) ? raw.codex : {};
   const consentVersion = raw.consentVersion === 1 ? 1 : 0;
 
   return {
@@ -158,6 +163,10 @@ export function normalizeCompanionSettings(value: unknown): CompanionSettings {
     consentVersion,
     enabled: consentVersion === 1 && raw.enabled === true,
     target: companionTargetIds.includes(raw.target as CompanionTargetId) ? raw.target as CompanionTargetId : "codex",
+    codex: {
+      model: normalizeText(codex.model, 120),
+      reasoningEffort: normalizeText(codex.reasoningEffort, 40),
+    },
     profile: {
       name: normalizeText(profile.name, 120),
       preferredAddress: normalizeText(profile.preferredAddress, 120),
@@ -178,7 +187,9 @@ export function normalizeCompanionSettings(value: unknown): CompanionSettings {
       // consent that could silently activate when a future plugin ships.
       screenEnabled: false,
     },
-    wake: { enabled: wake.enabled === true },
+    // Enabling wake remains an explicit user choice. Runtime availability is
+    // checked separately so a missing or invalid bundle cannot arm the microphone.
+    wake: { enabled: wake.enabled === true, followUpEnabled: wake.followUpEnabled !== false },
   };
 }
 

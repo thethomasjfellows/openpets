@@ -6,3 +6,7 @@
 /plugins/**/*.svg text eol=lf
 /plugins/**/.openpets-approved-hosts text eol=lf
 /plugins/**/*.webp binary
+
+# Native wake build-input digests must be identical across target OS checkouts.
+/apps/desktop/wake-helper/** text eol=lf
+/apps/desktop/src/voice-wake-*.ts text eol=lf

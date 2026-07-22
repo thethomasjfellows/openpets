@@ -6,6 +6,7 @@ import { app } from "electron";
 
 import { defaultPetScale, markOnboardingCompleted, normalizeOnboardingCompleted, normalizePetConfinementEnabled, normalizePetCrossDisplayEnabled, normalizePetGravityEnabled, normalizePetScale, normalizeReadSpeechBubblesAloud, petScaleOptions, type PetScaleValue } from "./app-state-core.js";
 import { builtInPet } from "./built-in-pet.js";
+import { normalizeCodexReactionPreferences, type CodexReactionPreferences } from "./codex-reaction-preferences.js";
 import type { Point } from "./display.js";
 import { isSupportedLocale, type LocalePreference } from "./i18n/catalog.js";
 import { allowedIntegrationLifecycles, allowedReactions, type OpenPetsIntegrationLifecycle, type OpenPetsReaction } from "./local-ipc-protocol.js";
@@ -88,6 +89,7 @@ export interface OpenPetsStateV1 {
   };
   readonly integrations: {
     readonly codex: {
+      readonly reactionPreferences: CodexReactionPreferences;
       readonly lastEvent?: {
         readonly lifecycle: OpenPetsIntegrationLifecycle;
         readonly occurredAt: number;
@@ -383,11 +385,32 @@ export function recordCodexIntegrationEvent(
     integrations: {
       ...state.integrations,
       codex: {
+        ...state.integrations.codex,
         lastEvent: {
           lifecycle: event.lifecycle,
           occurredAt: Math.floor(event.occurredAt),
           receivedAt: Math.floor(receivedAt),
         },
+      },
+    },
+  });
+  commitState(nextState);
+  return getAppStateSnapshot();
+}
+
+export function updateCodexReactionPreferences(patch: Partial<CodexReactionPreferences>): OpenPetsStateV1 {
+  const state = getInitializedState();
+  const reactionPreferences = normalizeCodexReactionPreferences({
+    ...state.integrations.codex.reactionPreferences,
+    ...patch,
+  });
+  const nextState = normalizeState({
+    ...state,
+    integrations: {
+      ...state.integrations,
+      codex: {
+        ...state.integrations.codex,
+        reactionPreferences,
       },
     },
   });
@@ -562,7 +585,8 @@ function normalizeIntegrations(value: unknown): OpenPetsStateV1["integrations"] 
   const record = isRecord(value) ? value : {};
   const codex = isRecord(record.codex) ? record.codex : {};
   const lastEvent = normalizeCodexLastEvent(codex.lastEvent);
-  return { codex: lastEvent ? { lastEvent } : {} };
+  const reactionPreferences = normalizeCodexReactionPreferences(codex.reactionPreferences);
+  return { codex: { reactionPreferences, ...(lastEvent ? { lastEvent } : {}) } };
 }
 
 function normalizeCodexLastEvent(value: unknown): OpenPetsStateV1["integrations"]["codex"]["lastEvent"] {
@@ -743,7 +767,9 @@ function createDefaultState(): OpenPetsStateV1 {
     },
     defaultPet: {},
     integrations: {
-      codex: {},
+      codex: {
+        reactionPreferences: normalizeCodexReactionPreferences(undefined),
+      },
     },
     analytics: {
       distinctId: randomUUID(),

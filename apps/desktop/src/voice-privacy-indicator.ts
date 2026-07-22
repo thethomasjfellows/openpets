@@ -1,4 +1,4 @@
-import { BrowserWindow } from "electron";
+import { BrowserWindow, screen } from "electron";
 
 import { createAppIcon } from "./assets.js";
 import { debug } from "./logger.js";
@@ -42,11 +42,18 @@ export class VoicePrivacyIndicator {
       window.setAlwaysOnTop(true, process.platform === "linux" ? "screen-saver" : "floating");
       window.setIgnoreMouseEvents(true);
       if (process.platform === "linux") window.setVisibleOnAllWorkspaces(true);
-      const html = `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><style>html,body{margin:0;background:transparent;font:600 13px system-ui;color:white}.badge{margin:4px;padding:9px 13px;border-radius:18px;background:rgba(153,27,27,.94);box-shadow:0 4px 18px rgba(0,0,0,.25)}.dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#fecaca;margin-right:8px}</style><div class="badge"><span class="dot"></span>OpenPets is listening</div>`;
+      const html = `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><style>html,body{margin:0;background:transparent;font:600 13px system-ui;color:white}.badge{margin:4px;padding:9px 13px;border-radius:18px;background:rgba(153,27,27,.94);box-shadow:0 4px 18px rgba(0,0,0,.25)}.dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#fecaca;margin-right:8px}</style><div class="badge"><span class="dot"></span>Listening for your request</div>`;
       void window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
       window.once("closed", () => { this.#window = null; if (this.#liveTracks > 0) this.#show(); });
       this.#window = window;
     }
+    const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+    const bounds = window.getBounds();
+    window.setPosition(
+      display.workArea.x + display.workArea.width - bounds.width - 12,
+      display.workArea.y + 12,
+      false,
+    );
     window.showInactive();
     debug("app", "voice privacy indicator shown", { liveTracks: this.#liveTracks });
   }

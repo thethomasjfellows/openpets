@@ -6,16 +6,21 @@ import { getAppStateSnapshot, initializeAppState, releaseStartupInstallLock } fr
 import { initializeDesktopAnalytics, trackDesktopEvent, trackDesktopStartup } from "./analytics.js";
 import { createAppIcon } from "./assets.js";
 import { CompanionContributionStore } from "./companion-contributions.js";
+import { getCodexAiBrain } from "./codex-ai-brain.js";
+import { isDesktopPermissionRestart } from "./desktop-permissions.js";
 import { initializeCompanionMemory } from "./companion-memory.js";
 import { getCompanionSettings, initializeCompanionSettings } from "./companion-settings.js";
 import { setLocaleFromPreference } from "./i18n/index.js";
-import { installDefaultPetDisplayHandlers, shouldOpenDefaultPetOnLaunch, showDefaultPet } from "./default-pet-controller.js";
+import { getDefaultPetPaused, getDefaultPetWindowForPlugins, installDefaultPetDisplayHandlers, isDefaultPetVisible, shouldOpenDefaultPetOnLaunch, showDefaultPet } from "./default-pet-controller.js";
 import { installAppLifecycle } from "./lifecycle.js";
 import { startLanController } from "./lan-controller.js";
 import { debug, error as logError, getLogFilePath, info, initializeLogger, warn } from "./logger.js";
 import { startLocalIpcServer } from "./local-ipc.js";
+import { migrateLegacyHostAiApiKey } from "./host-ai-gateway.js";
 import { startDevPluginWatcher } from "./plugin-dev-watcher.js";
 import { createElectronPluginHostCapabilities } from "./plugin-host-capabilities.js";
+import { initializePocketTtsService } from "./pockettts-service.js";
+import { initializePocketTtsSettings } from "./pockettts-settings.js";
 import { defaultPluginPetApi } from "./plugin-pet-api.js";
 import { initializePluginPlatformSettings } from "./plugin-platform-settings.js";
 import { ElectronPluginJsHost } from "./plugin-js-host.js";
@@ -23,14 +28,27 @@ import { getPluginService, initializePluginService } from "./plugin-service.js";
 import { createAppTray, refreshTrayMenu } from "./tray.js";
 import { checkForGitHubReleaseUpdate } from "./update-checker.js";
 import { installInternalUiHandlers, installInternalUiProtocol } from "./windows.js";
-import { initializeVoicePlatform } from "./voice-platform.js";
-import { initializeVoiceSettings } from "./voice-settings.js";
+import { getVoicePlatform, initializeVoicePlatform } from "./voice-platform.js";
+import { installVoiceConversationShortcut } from "./voice-conversation-shortcut.js";
+import { initializeLocalTranscriptionService } from "./voice-local-transcription.js";
+import { getVoiceSettings, initializeVoiceSettings } from "./voice-settings.js";
+import { initializeVoiceTranscriptionSettings } from "./voice-transcription-settings.js";
+import type { VoiceWakePowerEvent } from "./voice-wake-types.js";
+import { createElectronVisionCapture } from "./vision-capture.js";
+import { VisionAiRouter } from "./vision-ai-router.js";
+import { handleVisionPowerEvent, initializeVisionService, onVisionChanged } from "./vision-service.js";
+import { initializeVisionSettings } from "./vision-settings.js";
+import { initializeVisionStore } from "./vision-store.js";
 
 // OpenPets does not store browser passwords, cookies, or encrypted app secrets.
 // Keep Chromium/Electron from prompting for macOS Keychain or Linux keyring access
 // during startup/profile initialization.
 app.commandLine.appendSwitch("use-mock-keychain");
 app.commandLine.appendSwitch("password-store", "basic");
+// Pet speech is initiated by trusted main-process events, not a click inside
+// the transparent pet window. Chromium's default user-gesture gate would
+// otherwise leave provider audio waiting indefinitely even after synthesis.
+app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
 
 // Chromium's native window occlusion tracker treats every window on a display
 // as occluded while a fullscreen app is active there and stops painting it.
@@ -76,7 +94,7 @@ if (!gotSingleInstanceLock) {
     if (process.platform === "win32") {
       app.setAppUserModelId("dev.openpets.app");
     }
-    info("app", "startup begin", { version: app.getVersion(), platform: process.platform, arch: process.arch, packaged: app.isPackaged, pid: process.pid, ozonePlatform: app.commandLine.getSwitchValue("ozone-platform") || null, explicitOzonePlatformArg: hasExplicitOzonePlatformArg });
+    info("app", "startup begin", { version: app.getVersion(), platform: process.platform, arch: process.arch, packaged: app.isPackaged, pid: process.pid, permissionRestart: isDesktopPermissionRestart(process.argv), ozonePlatform: app.commandLine.getSwitchValue("ozone-platform") || null, explicitOzonePlatformArg: hasExplicitOzonePlatformArg });
     if (isLinux && allowWayland) {
       const effectiveOzone = app.commandLine.getSwitchValue("ozone-platform") || "(auto/system)";
       warn("app", "native Wayland mode active — pet positioning, gravity, walkabout, and drag are unsupported under native Wayland; remove OPENPETS_ALLOW_WAYLAND=1 to restore full functionality", { effectiveOzone });
@@ -88,9 +106,18 @@ if (!gotSingleInstanceLock) {
     }
 
     initializeAppState();
+    initializePocketTtsSettings(app.getPath("userData"));
+    const pocketTtsService = initializePocketTtsService();
     initializeVoiceSettings(app.getPath("userData"));
+    initializeVoiceTranscriptionSettings(app.getPath("userData"));
+    initializeLocalTranscriptionService(app.getPath("userData"), process.resourcesPath, (level, message, fields) => {
+      if (level === "warn") warn("app", message, fields);
+      else info("app", message, fields);
+    });
     initializeCompanionSettings(app.getPath("userData"));
     initializeCompanionMemory(app.getPath("userData"));
+    initializeVisionSettings(app.getPath("userData"));
+    const visionStore = initializeVisionStore(app.getPath("userData"));
     initializePluginPlatformSettings(app.getPath("userData"));
     initializeDesktopAnalytics();
     trackDesktopStartup();
@@ -119,13 +146,54 @@ if (!gotSingleInstanceLock) {
       },
     });
     const pluginCapabilities = createElectronPluginHostCapabilities(app.getPath("userData"), { companionContributions });
+    try {
+      const migration = await migrateLegacyHostAiApiKey(pluginCapabilities.secretsStore);
+      if (migration.migrated) info("app", "migrated legacy AI Brain credential", { provider: migration.provider });
+    } catch (migrationError) {
+      warn("app", "legacy AI Brain credential migration failed", { reason: String((migrationError as Error)?.message ?? migrationError) });
+    }
+    initializeVisionService({
+      store: visionStore,
+      capture: createElectronVisionCapture({
+        getDefaultPetBounds: () => getDefaultPetWindowForPlugins()?.getBounds() ?? null,
+      }),
+      aiGateway: new VisionAiRouter(getCodexAiBrain(), pluginCapabilities.aiGateway),
+      getDefaultPetId: () => getAppStateSnapshot().preferences.defaultPetId,
+      isDefaultPetVisible,
+      isDefaultPetPaused: getDefaultPetPaused,
+      log: (level, message, fields) => {
+        if (level === "debug") debug("vision", message, fields);
+        else if (level === "info") info("vision", message, fields);
+        else warn("vision", message, fields);
+      },
+    });
+    onVisionChanged(() => refreshTrayMenu());
     initializeVoicePlatform(pluginCapabilities);
+    installVoiceConversationShortcut(() => { getVoicePlatform()?.wake.cancelConversation("shortcut"); });
+    void pocketTtsService.autoStart(getVoiceSettings().providers.pockettts.voiceId).catch((error) => {
+      warn("app", "PocketTTS auto-start failed", { reason: error instanceof Error ? error.message : "unknown" });
+    });
     let devPluginWatcher: ReturnType<typeof startDevPluginWatcher> | undefined;
     const pluginService = initializePluginService(app.getPath("userData"), defaultPluginPetApi, app.getVersion(), new ElectronPluginJsHost(), writePluginRuntimeLog, process.env.OPENPETS_DISABLE_PLUGIN_CATALOG === "1" || devPluginMode, resolveBundledOfficialPluginRoots(), !devPluginMode, pluginCapabilities, (properties) => {
       trackDesktopEvent("desktop_plugin_runtime_error", properties);
     }, (sourcePath) => devPluginWatcher?.addPaths([sourcePath]), (sourcePath) => devPluginWatcher?.removePath(sourcePath));
-    // Wall-clock schedules (daily/cron/at) re-arm deterministically after sleep.
-    powerMonitor.on("resume", () => pluginService.runtime.resyncSchedules());
+    const handleWakePowerEvent = (event: VoiceWakePowerEvent) => {
+      const wake = getVoicePlatform()?.wake;
+      if (!wake) return;
+      void wake.handlePowerEvent(event).catch((error) => {
+        logError("app", "wake power event failed", error, { event });
+      });
+    };
+    powerMonitor.on("suspend", () => { handleWakePowerEvent("suspend"); handleVisionPowerEvent("suspend"); });
+    powerMonitor.on("lock-screen", () => { handleWakePowerEvent("lock"); handleVisionPowerEvent("lock"); });
+    powerMonitor.on("unlock-screen", () => { handleWakePowerEvent("unlock"); handleVisionPowerEvent("unlock"); });
+    // Wall-clock schedules (daily/cron/at) and future wake listening re-arm
+    // deterministically after sleep.
+    powerMonitor.on("resume", () => {
+      handleWakePowerEvent("resume");
+      handleVisionPowerEvent("resume");
+      pluginService.runtime.resyncSchedules();
+    });
     if (shouldOpenDefaultPetOnLaunch()) {
       showDefaultPet();
       trackDesktopEvent("desktop_default_pet_shown", { reason: "launch" });

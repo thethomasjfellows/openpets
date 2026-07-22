@@ -35,8 +35,18 @@ assert.deepEqual(
   { text: "Plugin answer", key: "Plugin answer" },
 );
 assert.deepEqual(
-  createOrdinaryBubbleNarrationCandidate({ reactionMessage: "All done", paused: false }),
+  createOrdinaryBubbleNarrationCandidate({ reactionMessage: "All done", reaction: "success", paused: false }),
   { text: "All done", key: "All done" },
+);
+assert.equal(
+  createOrdinaryBubbleNarrationCandidate({ reactionMessage: "Moving along", reaction: "working", paused: false }),
+  null,
+  "intermediate task reactions stay visible without repeatedly speaking progress filler",
+);
+assert.deepEqual(
+  createOrdinaryBubbleNarrationCandidate({ reactionMessage: "Task failed", reaction: "error", paused: false }),
+  { text: "Task failed", key: "Task failed" },
+  "terminal task reactions remain audible",
 );
 
 console.error("Bubble narration validation passed.");

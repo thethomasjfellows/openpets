@@ -22,6 +22,7 @@ import {
   _resetMotionStatesForTesting,
   registerPet,
   motionSetPhysics,
+  motionSetFollowCursor,
   motionMoveTo,
 } from "../src/pet-motion-engine.js";
 import { _setScreenForTesting as setDisplayScreen, invalidateDisplayCache, setCrossDisplayRoamingEnabled } from "../src/display.js";
@@ -130,6 +131,58 @@ describe("pet-motion-engine NaN coordinate guards", () => {
         `setPosition called with non-finite coords: (${x}, ${y})`,
       );
     }
+  });
+
+  it("native setPosition conversion failures never escape the shared ticker", async () => {
+    _setScreenForTesting(normalScreen as any);
+    setDisplayScreen(normalScreen as any);
+    invalidateDisplayCache();
+
+    let calls = 0;
+    const accessor = () => ({
+      getPosition: (): [number, number] => [100, 100],
+      isDestroyed: () => false,
+      isVisible: () => true,
+      setPosition: () => {
+        calls += 1;
+        throw new TypeError("Error processing argument at index 0, conversion failure");
+      },
+    } as any);
+
+    registerPet("native-conversion-failure", accessor);
+    motionSetPhysics("native-conversion-failure", accessor, { gravity: true, bounce: 0 });
+    await new Promise<void>((resolve) => setTimeout(resolve, loopIntervalMs * 5));
+
+    assert.equal(calls, 1, "a failed native write unregisters the broken motion state instead of retrying forever");
+    assert.equal(_sharedTickerActiveForTesting(), false, "the failed pet cannot leave a crashing timer active");
+  });
+
+  it("finite coordinates outside Electron's signed 32-bit boundary are never written", async () => {
+    const hugeDisplay = {
+      workArea: {
+        x: Number.MAX_SAFE_INTEGER - 4_000,
+        y: Number.MAX_SAFE_INTEGER - 4_000,
+        width: 2_000,
+        height: 2_000,
+      },
+    };
+    const hugeCursorScreen = {
+      getCursorScreenPoint: () => ({ x: Number.MAX_SAFE_INTEGER, y: Number.MAX_SAFE_INTEGER }),
+      getAllDisplays: () => [hugeDisplay],
+      getPrimaryDisplay: () => hugeDisplay,
+      getDisplayNearestPoint: () => hugeDisplay,
+    };
+    _setScreenForTesting(hugeCursorScreen as any);
+    setDisplayScreen(hugeCursorScreen as any);
+    invalidateDisplayCache();
+
+    const setPositionCalls: Array<[number, number]> = [];
+    const accessor = makeWindowMock(100, 100, (x, y) => setPositionCalls.push([x, y]));
+    registerPet("out-of-range-position", accessor);
+    motionSetFollowCursor("out-of-range-position", accessor, { enabled: true, lag: 0 });
+    await new Promise<void>((resolve) => setTimeout(resolve, loopIntervalMs * 5));
+
+    assert.deepEqual(setPositionCalls, [], "out-of-range coordinates are rejected before Electron conversion");
   });
 
   it("in-flight motionMoveTo settles (promise resolves) even when getPosition() returns [NaN, NaN]", async () => {

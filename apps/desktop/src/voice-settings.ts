@@ -1,6 +1,17 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
+import { canonicalWakeText, normalizeWakeInterpretations } from "./voice-wake-calibration-normalization.js";
+import {
+  officialVoiceWakePhrase,
+  officialVoiceWakePhraseId,
+  type VoiceWakeEngine,
+  type VoiceWakeMicrophoneSelection,
+  type VoiceWakeSensitivity,
+} from "./voice-wake-types.js";
+
+export { canonicalWakeText };
+
 export const voiceProviderIds = ["system", "pockettts", "openai-compatible", "elevenlabs"] as const;
 export type VoiceProviderId = typeof voiceProviderIds[number];
 export type VoiceOverlapPolicy = "interrupt" | "queue" | "ignore";
@@ -22,17 +33,8 @@ export type VoiceAttemptPlanEntry = {
   readonly fallbackReason?: string;
 };
 
-export type VoicePetOverride = {
-  readonly providerId?: VoiceProviderId;
-  readonly voiceId?: string;
-  readonly model?: string;
-  readonly overlapPolicy?: VoiceOverlapPolicy;
-  readonly providerFallback?: VoiceProviderFallbackPolicy;
-  readonly voiceFallback?: VoiceFallbackPolicy;
-};
-
 export type VoiceSettings = {
-  readonly version: 1;
+  readonly version: 4;
   readonly output: VoiceSelection;
   readonly providers: {
     readonly system: { readonly voiceId?: string; readonly rate: number };
@@ -40,14 +42,18 @@ export type VoiceSettings = {
     readonly "openai-compatible": { readonly baseUrl: string; readonly voiceId: string; readonly model: string };
     readonly elevenlabs: { readonly baseUrl: string; readonly voiceId: string; readonly model: string; readonly outputFormat: string };
   };
-  readonly petOverrides: Readonly<Record<string, VoicePetOverride>>;
-  readonly listening: {
-    readonly pushToTalkEnabled: boolean;
-    readonly bargeIn: boolean;
-    readonly timeoutMs: number;
+  readonly wake: {
+    readonly engine: VoiceWakeEngine;
+    readonly phraseId: typeof officialVoiceWakePhraseId;
+    readonly phrase: string;
+    readonly sensitivity: VoiceWakeSensitivity;
+    readonly microphone?: VoiceWakeMicrophoneSelection;
+    readonly calibration?: {
+      readonly phrase: string;
+      readonly variants: readonly string[];
+      readonly updatedAt: number;
+    };
   };
-  readonly wake: { readonly enabled: boolean; readonly phrase: string };
-  readonly conversation: { readonly target: "none" | "codex"; readonly allowStatelessFallback: boolean };
 };
 
 export type VoiceSettingsSnapshot = VoiceSettings & {
@@ -55,7 +61,7 @@ export type VoiceSettingsSnapshot = VoiceSettings & {
 };
 
 export const defaultVoiceSettings: VoiceSettings = {
-  version: 1,
+  version: 4,
   output: {
     providerId: "system",
     overlapPolicy: "interrupt",
@@ -68,10 +74,12 @@ export const defaultVoiceSettings: VoiceSettings = {
     "openai-compatible": { baseUrl: "https://api.openai.com/v1", voiceId: "alloy", model: "gpt-4o-mini-tts" },
     elevenlabs: { baseUrl: "https://api.elevenlabs.io", voiceId: "", model: "eleven_multilingual_v2", outputFormat: "mp3_44100_128" },
   },
-  petOverrides: {},
-  listening: { pushToTalkEnabled: false, bargeIn: true, timeoutMs: 10_000 },
-  wake: { enabled: false, phrase: "" },
-  conversation: { target: "none", allowStatelessFallback: false },
+  wake: {
+    engine: "official-livekit",
+    phraseId: officialVoiceWakePhraseId,
+    phrase: officialVoiceWakePhrase,
+    sensitivity: "easy",
+  },
 };
 
 const settingsFileName = "openpets-voice-settings.json";
@@ -96,16 +104,8 @@ export function getVoiceSettingsSnapshot(installedPets: ReadonlyArray<{ readonly
   };
 }
 
-export function resolveVoiceSelection(settings: VoiceSettings, petId: string): VoiceSelection {
-  const override = settings.petOverrides[petId];
-  return {
-    providerId: override?.providerId ?? settings.output.providerId,
-    voiceId: override?.voiceId ?? settings.output.voiceId,
-    model: override?.model ?? settings.output.model,
-    overlapPolicy: override?.overlapPolicy ?? settings.output.overlapPolicy,
-    providerFallback: override?.providerFallback ?? settings.output.providerFallback,
-    voiceFallback: override?.voiceFallback ?? settings.output.voiceFallback,
-  };
+export function resolveVoiceSelection(settings: VoiceSettings, _petId: string): VoiceSelection {
+  return settings.output;
 }
 
 export function resolveVoiceAttemptPlan(selection: VoiceSelection, chosenVoice: string | undefined, allowFallback: boolean): VoiceAttemptPlanEntry[] {
@@ -143,20 +143,15 @@ export function normalizeVoiceSettings(value: unknown): VoiceSettings {
   const pocket = isRecord(providers.pockettts) ? providers.pockettts : {};
   const openai = isRecord(providers["openai-compatible"]) ? providers["openai-compatible"] : {};
   const eleven = isRecord(providers.elevenlabs) ? providers.elevenlabs : {};
-  const listening = isRecord(raw.listening) ? raw.listening : {};
   const wake = isRecord(raw.wake) ? raw.wake : {};
-  const conversation = isRecord(raw.conversation) ? raw.conversation : {};
-  const petOverridesRaw = isRecord(raw.petOverrides) ? raw.petOverrides : {};
-  const petOverrides: Record<string, VoicePetOverride> = {};
-
-  for (const [petId, entry] of Object.entries(petOverridesRaw).slice(0, 200)) {
-    if (!isSafeId(petId) || !isRecord(entry)) continue;
-    const normalized = normalizePetOverride(entry);
-    if (Object.keys(normalized).length > 0) petOverrides[petId] = normalized;
-  }
-
+  const requestedPhrase = normalizeText(wake.phrase, 120, defaultVoiceSettings.wake.phrase);
+  const calibration = normalizeWakeCalibration(wake.calibration);
+  const microphone = normalizeWakeMicrophone(wake.microphone);
+  const engine = normalizeWakeEngine(wake.engine, requestedPhrase);
+  const phrase = engine === "official-livekit" ? officialVoiceWakePhrase : requestedPhrase;
+  const sensitivity = normalizeEnum(wake.sensitivity, ["strict", "balanced", "easy"] as const, "easy");
   return {
-    version: 1,
+    version: 4,
     output: {
       providerId: normalizeProviderId(output.providerId, "system"),
       voiceId: normalizeOptionalText(output.voiceId, 160),
@@ -171,31 +166,44 @@ export function normalizeVoiceSettings(value: unknown): VoiceSettings {
       "openai-compatible": { baseUrl: normalizeUrl(openai.baseUrl, defaultVoiceSettings.providers["openai-compatible"].baseUrl), voiceId: normalizeText(openai.voiceId, 160, "alloy"), model: normalizeText(openai.model, 160, "gpt-4o-mini-tts") },
       elevenlabs: { baseUrl: normalizeUrl(eleven.baseUrl, defaultVoiceSettings.providers.elevenlabs.baseUrl), voiceId: normalizeText(eleven.voiceId, 200, ""), model: normalizeText(eleven.model, 160, "eleven_multilingual_v2"), outputFormat: normalizeText(eleven.outputFormat, 80, "mp3_44100_128") },
     },
-    petOverrides,
-    listening: {
-      pushToTalkEnabled: listening.pushToTalkEnabled === true,
-      bargeIn: listening.bargeIn !== false,
-      timeoutMs: Math.round(clampNumber(listening.timeoutMs, 1_000, 30_000, 10_000)),
-    },
-    wake: { enabled: wake.enabled === true, phrase: normalizeText(wake.phrase, 120, "") },
-    conversation: {
-      target: conversation.target === "codex" ? "codex" : "none",
-      allowStatelessFallback: conversation.allowStatelessFallback === true,
+    // Legacy wake.enabled is intentionally ignored. Companion settings own
+    // explicit always-armed microphone consent; Voice settings own the phrase.
+    wake: {
+      engine,
+      phraseId: officialVoiceWakePhraseId,
+      phrase,
+      sensitivity,
+      ...(microphone ? { microphone } : {}),
+      ...(engine === "custom-sherpa" && calibration ? { calibration } : {}),
     },
   };
 }
 
-function normalizePetOverride(value: Record<string, unknown>): VoicePetOverride {
-  const out: Record<string, unknown> = {};
-  if (voiceProviderIds.includes(value.providerId as VoiceProviderId)) out.providerId = value.providerId;
-  const voiceId = normalizeOptionalText(value.voiceId, 160);
-  const model = normalizeOptionalText(value.model, 160);
-  if (voiceId) out.voiceId = voiceId;
-  if (model) out.model = model;
-  if (["interrupt", "queue", "ignore"].includes(String(value.overlapPolicy))) out.overlapPolicy = value.overlapPolicy;
-  if (["system", "fail"].includes(String(value.providerFallback))) out.providerFallback = value.providerFallback;
-  if (["provider-default", "fail"].includes(String(value.voiceFallback))) out.voiceFallback = value.voiceFallback;
-  return out as VoicePetOverride;
+function normalizeWakeEngine(value: unknown, phrase: string): VoiceWakeEngine {
+  if (value === "official-livekit" || value === "custom-sherpa") return value;
+  const canonical = canonicalWakeText(phrase);
+  return canonical === canonicalWakeText(officialVoiceWakePhrase)
+    || canonical === canonicalWakeText("Hey OpenPet")
+    ? "official-livekit"
+    : "custom-sherpa";
+}
+
+function normalizeWakeMicrophone(value: unknown): VoiceWakeMicrophoneSelection | undefined {
+  if (!isRecord(value)) return undefined;
+  const deviceId = normalizeOptionalText(value.deviceId, 512);
+  const label = normalizeOptionalText(value.label, 160);
+  return deviceId ? { deviceId, ...(label ? { label } : {}) } : undefined;
+}
+
+function normalizeWakeCalibration(value: unknown): VoiceSettings["wake"]["calibration"] {
+  if (!isRecord(value)) return undefined;
+  const phrase = normalizeText(value.phrase, 120, "");
+  const updatedAt = typeof value.updatedAt === "number" && Number.isFinite(value.updatedAt) && value.updatedAt > 0
+    ? Math.round(value.updatedAt)
+    : 0;
+  if (!phrase || !updatedAt || !Array.isArray(value.variants)) return undefined;
+  const variants = normalizeWakeInterpretations(phrase, value.variants);
+  return { phrase, variants, updatedAt };
 }
 
 function mergeVoiceSettings(current: VoiceSettings, patch: Record<string, unknown>): unknown {
@@ -211,10 +219,7 @@ function mergeVoiceSettings(current: VoiceSettings, patch: Record<string, unknow
       "openai-compatible": { ...current.providers["openai-compatible"], ...(isRecord(patch.providers) && isRecord(patch.providers["openai-compatible"]) ? patch.providers["openai-compatible"] : {}) },
       elevenlabs: { ...current.providers.elevenlabs, ...(isRecord(patch.providers) && isRecord(patch.providers.elevenlabs) ? patch.providers.elevenlabs : {}) },
     },
-    petOverrides: isRecord(patch.petOverrides) ? patch.petOverrides : current.petOverrides,
-    listening: { ...current.listening, ...(isRecord(patch.listening) ? patch.listening : {}) },
     wake: { ...current.wake, ...(isRecord(patch.wake) ? patch.wake : {}) },
-    conversation: { ...current.conversation, ...(isRecord(patch.conversation) ? patch.conversation : {}) },
   };
 }
 
@@ -267,10 +272,6 @@ function normalizeOptionalText(value: unknown, max: number): string | undefined 
 function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
   const number = typeof value === "number" ? value : Number.NaN;
   return Number.isFinite(number) ? Math.min(max, Math.max(min, number)) : fallback;
-}
-
-function isSafeId(value: string): boolean {
-  return value.length > 0 && value.length <= 200 && /^[A-Za-z0-9._:-]+$/.test(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

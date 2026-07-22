@@ -52,6 +52,7 @@ export interface AgentSetupSnapshot {
   readonly cursorPreview: CursorSetupPreview;
   readonly codexStatus: CodexIntegrationSnapshot;
   readonly codexLastEvent?: OpenPetsStateV1["integrations"]["codex"]["lastEvent"];
+  readonly codexReactionPreferences: OpenPetsStateV1["integrations"]["codex"]["reactionPreferences"];
   readonly commandPaths: AgentSetupCommandPaths;
   readonly busy: boolean;
   readonly lastAction?: AgentSetupActionResult;
@@ -171,6 +172,7 @@ export async function getAgentSetupSnapshot(selectedPetId?: unknown, commandMode
     cursorPreview: cursor.preview,
     codexStatus,
     codexLastEvent: appState.integrations.codex.lastEvent,
+    codexReactionPreferences: appState.integrations.codex.reactionPreferences,
     commandPaths: getAgentSetupCommandPaths(),
     busy: operationRunning,
     lastAction,

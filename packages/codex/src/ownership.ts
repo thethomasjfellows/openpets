@@ -5,7 +5,7 @@ import type { CodexIntegrationOptions, CodexManagedChange } from "./types.js";
 
 export const openPetsCodexMarker = "--openpets-managed";
 export const openPetsCodexMcpServerName = "openpets" as const;
-export const supportedCodexVersion = { major: 0, minor: 144 } as const;
+export const minimumSupportedCodexVersion = { major: 0, minor: 144 } as const;
 
 export const managedCodexHookEvents = [
   "UserPromptSubmit",
@@ -110,8 +110,8 @@ export function isSupportedCodexVersion(version: string | undefined): boolean {
   const match = /(?:codex-cli\s+)?(\d+)\.(\d+)\.(\d+)/i.exec(version);
   return Boolean(
     match &&
-      Number(match[1]) === supportedCodexVersion.major &&
-      Number(match[2]) === supportedCodexVersion.minor,
+      Number(match[1]) === minimumSupportedCodexVersion.major &&
+      Number(match[2]) >= minimumSupportedCodexVersion.minor,
   );
 }
 

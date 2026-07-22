@@ -1,4 +1,4 @@
-﻿import assert from "node:assert/strict";
+import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 
 import { allowedReactions } from "./local-ipc-protocol.js";
 import { pickReactionMessage, reactionMessagePools } from "./reaction-messages.js";
+import { validateLiveKitWakeBundle } from "./voice-wake-livekit-manifest.js";
+import { validateSherpaVoiceWakeBundle } from "./voice-wake-sherpa-manifest.js";
 
 const distDir = dirname(fileURLToPath(import.meta.url));
 const appDir = dirname(distDir);
@@ -15,12 +17,35 @@ const rootPackageJson = JSON.parse(readFileSync(join(repoRoot, "package.json"), 
 const workspaceConfig = readFileSync(join(repoRoot, "pnpm-workspace.yaml"), "utf8");
 const builderConfigPath = join(appDir, "electron-builder.yml");
 const builderConfig = readFileSync(builderConfigPath, "utf8");
+const releaseScript = readFileSync(join(appDir, "scripts", "release-local.mjs"), "utf8");
+const packageRunner = readFileSync(join(appDir, "scripts", "run-electron-builder-current.mjs"), "utf8");
 
 assert.equal(packageJson.description, "OpenPets tray-first desktop companion app.");
 assert.equal(packageJson.author, "OpenPets");
 assert.match(packageJson.scripts?.["dev:debug"] ?? "", /OPENPETS_LOG_LEVEL=debug OPENPETS_LOG_CONSOLE=1 pnpm dev/, "desktop debug dev script must enable verbose log mirroring.");
-assert.match(packageJson.scripts?.package ?? "", /node scripts\/clean-package-output\.cjs && electron-builder/);
-assert.match(packageJson.scripts?.["package:dir"] ?? "", /node scripts\/clean-package-output\.cjs && electron-builder --dir/);
+assert.match(
+  packageJson.scripts?.package ?? "",
+  /wake:prepare[\s\S]*wake:smoke[\s\S]*pnpm build[\s\S]*wake:stage[\s\S]*clean-package-output\.cjs && node scripts\/run-electron-builder-current\.mjs$/,
+  "desktop packaging must build, smoke-test, validate, and stage the native wake bundle.",
+);
+assert.match(
+  packageJson.scripts?.["package:dir"] ?? "",
+  /wake:prepare[\s\S]*wake:smoke[\s\S]*pnpm build[\s\S]*wake:stage[\s\S]*clean-package-output\.cjs && node scripts\/run-electron-builder-current\.mjs --dir --validate-output$/,
+);
+const injectedTarget = spawnSync(
+  process.execPath,
+  [join(appDir, "scripts", "run-electron-builder-current.mjs"), "--win"],
+  { encoding: "utf8" },
+);
+assert.notEqual(injectedTarget.status, 0, "ordinary packaging must reject cross-target arguments before electron-builder runs.");
+assert.match(`${injectedTarget.stderr ?? ""}${injectedTarget.stdout ?? ""}`, /Unknown packaging option/);
+assert.match(packageRunner, /process\.platform === "win32"[\s\S]*"cmd\.exe"[\s\S]*"pnpm\.cmd"/, "ordinary Windows packaging must invoke pnpm through its command shim.");
+assert.match(
+  releaseScript,
+  /electron-builder[\s\S]*validatePackagedWakeTarget\(build\.wakeTarget\)/,
+  "every release target must validate its packaged wake resources after electron-builder runs.",
+);
+assert.match(releaseScript, /--wake-resource[\s\S]*--wake-target/);
 assert.equal(rootPackageJson.scripts?.["package:desktop:dir"], "pnpm build && pnpm --filter @open-pets/desktop package:dir");
 assert.equal(packageJson.dependencies?.["@open-pets/claude"], "workspace:*");
 assert.equal(packageJson.dependencies?.["@open-pets/cli"], "workspace:*");
@@ -47,14 +72,33 @@ assert.match(builderConfig, /asarUnpack:/);
 assert.match(builderConfig, /node_modules\/\*\*/);
 assert.match(builderConfig, /dist\/\*\*/);
 assert.match(builderConfig, /control-center-preload\.cjs/);
+assert.match(builderConfig, /voice-capture-preload\.cjs/);
+assert.match(builderConfig, /voice-capture\.html/);
 assert.match(builderConfig, /pet-preload\.cjs/);
 assert.match(builderConfig, /plugin-sdk-preload\.cjs/);
 assert.match(builderConfig, /plugin-command-form-preload\.cjs/);
 assert.match(builderConfig, /assets\/\*\*/);
 assert.match(builderConfig, /extraResources:[\s\S]*from:\s*\.\.\/\.\.\/plugins\/official[\s\S]*to:\s*plugins\/official/, "desktop packages must include bundled official plugins as extra resources.");
+assert.match(
+  builderConfig,
+  /from:\s*wake-helper\/package-resource[\s\S]*to:\s*voice-wake\/sherpa-onnx/,
+  "desktop packages must include the target-specific validated Sherpa bundle outside ASAR.",
+);
+assert.match(
+  builderConfig,
+  /from:\s*livekit-wake-helper\/package-resource[\s\S]*to:\s*voice-wake\/livekit/,
+  "desktop packages must include the attested LiveKit classifier bundle outside ASAR.",
+);
 assert.match(builderConfig, /icon:\s*assets\/app-icon\.icns/);
+assert.match(
+  builderConfig,
+  /signIgnore:[\s\S]*voice-wake\/sherpa-onnx\/\(\?:bin\|lib\)/,
+  "macOS app signing must preserve the already-signed helper/runtime bytes recorded by the manifest.",
+);
 
 assert.ok(existsSync(join(appDir, "control-center-preload.cjs")), "control-center-preload.cjs must exist for Control Center IPC.");
+assert.ok(existsSync(join(appDir, "voice-capture-preload.cjs")), "voice-capture-preload.cjs must exist for sandboxed wake PCM IPC.");
+assert.ok(existsSync(join(appDir, "voice-capture.html")), "voice-capture.html must exist for a trustworthy microphone-capture origin.");
 assert.ok(existsSync(join(appDir, "pet-preload.cjs")), "pet-preload.cjs must exist for pet window motion state updates.");
 assert.ok(existsSync(join(appDir, "plugin-sdk-preload.cjs")), "plugin-sdk-preload.cjs must exist for JavaScript plugin SDK hosting.");
 assert.ok(existsSync(join(appDir, "plugin-command-form-preload.cjs")), "plugin-command-form-preload.cjs must exist for plugin command forms.");
@@ -71,6 +115,13 @@ assert.match(readFileSync(join(appDir, "src", "assets.ts"), "utf8"), /assets["']
 const petWindowSource = readFileSync(join(appDir, "src", "pet-window.ts"), "utf8");
 const controlCenterPreloadSource = readFileSync(join(appDir, "control-center-preload.cjs"), "utf8");
 const controlCenterRendererSource = readFileSync(join(appDir, "src", "renderer", "src", "main.tsx"), "utf8");
+const voiceCaptureSource = readFileSync(join(appDir, "src", "voice-capture.ts"), "utf8");
+const voiceCapturePage = readFileSync(join(appDir, "voice-capture.html"), "utf8");
+
+assert.match(voiceCaptureSource, /loadFile\(this\.#pagePath\)/, "voice capture must load from a potentially trustworthy file origin so mediaDevices is exposed.");
+assert.doesNotMatch(voiceCaptureSource, /data:text\/html/, "voice capture must not use an opaque data URL that removes navigator.mediaDevices.");
+assert.match(voiceCapturePage, /default-src 'none'/, "the dedicated voice-capture page must remain deny-by-default.");
+assert.match(voiceCapturePage, /worker-src blob:/, "the dedicated voice-capture page must allow only its generated AudioWorklet module.");
 const petPreloadSource = readFileSync(join(appDir, "pet-preload.cjs"), "utf8");
 const reactionMessagesSource = readFileSync(join(appDir, "src", "reaction-messages.ts"), "utf8");
 const displaySource = readFileSync(join(appDir, "src", "display.ts"), "utf8");
@@ -99,6 +150,29 @@ const leaseManagerSource = readFileSync(join(appDir, "src", "lease-manager.ts"),
 const defaultPetControllerSource = readFileSync(join(appDir, "src", "default-pet-controller.ts"), "utf8");
 const agentPetControllerSourceForLogging = readFileSync(join(appDir, "src", "agent-pet-controller.ts"), "utf8");
 const mappingDoc = readFileSync(join(repoRoot, "docs", "pets.md"), "utf8");
+const voiceWakeRuntimeSource = readFileSync(join(appDir, "src", "voice-wake-sherpa-runtime.ts"), "utf8");
+const voicePlatformSource = readFileSync(join(appDir, "src", "voice-platform.ts"), "utf8");
+const voiceWakeCoordinatorSource = readFileSync(join(appDir, "src", "voice-wake-word-service.ts"), "utf8");
+assert.match(
+  voiceWakeRuntimeSource,
+  /bundleRoot:\s*join\(resourcesPath, "voice-wake", "sherpa-onnx"\)/,
+  "production wake must resolve the staged resource bundle.",
+);
+assert.match(
+  voiceWakeRuntimeSource,
+  /validateSherpaVoiceWakeBundle/,
+  "production wake must validate the bundle before reporting availability.",
+);
+assert.match(
+  voicePlatformSource,
+  /createProductionOfficialVoiceWakeRuntime/,
+  "production voice must use the composed official wake runtime.",
+);
+assert.match(
+  voiceWakeCoordinatorSource,
+  /const runtime = this\.#runtime\.health\(selection\);[\s\S]*if \(!runtime\.ready\) return/,
+  "ambient wake capture must remain gated by the selected validated runtime.",
+);
 assert.match(loggerSource, /openpets\.log/, "desktop logger must write a user-sendable openpets.log file.");
 assert.match(loggerSource, /openpets\.previous\.log/, "desktop logger must retain a previous log file for bug reports.");
 assert.match(loggerSource, /OPENPETS_LOG_LEVEL/, "desktop logger must support verbose dev logging via environment.");
@@ -220,7 +294,7 @@ assert.match(windowsSource, /openpets:set-desktop-analytics-consent/, "settings 
 assert.match(controlCenterPreloadSource, /checkForUpdates/, "Control Center preload must expose update checks.");
 assert.match(controlCenterPreloadSource, /setDesktopAnalyticsConsent/, "Control Center preload must expose desktop analytics consent updates.");
 assert.match(controlCenterPreloadSource, /getReactionAnimationSettings/, "Control Center preload must expose reaction animation settings metadata.");
-assert.match(controlCenterRendererSource, /function SettingsView\(\)/, "Control Center must include the settings page.");
+assert.match(controlCenterRendererSource, /function SettingsView\b/, "Control Center must include the settings page.");
 assert.match(controlCenterRendererSource, /getPetsState/, "Control Center must include the pets page data bridge.");
 assert.match(controlCenterRendererSource, /function IntegrationsView\(\)/, "Control Center must include the integrations page.");
 assert.match(petWindowSource, /max-width:\s*min\(220px/, "very long message bubbles must stay capped within the tight pet window.");
@@ -270,13 +344,44 @@ assert.ok(existsSync(join(repoRoot, "packages", "cli", "dist", "index.js")), "@o
 assert.ok(existsSync(join(repoRoot, "packages", "opencode", "dist", "plugin.js")), "@open-pets/opencode plugin must be built before packaging.");
 assert.ok(existsSync(join(repoRoot, "packages", "agent-events", "dist", "index.js")), "@open-pets/agent-events must be built before packaging.");
 
-if (process.argv.includes("--output")) {
+const wakeResourceDir = valueAfterArgument("--wake-resource");
+const wakeTarget = valueAfterArgument("--wake-target");
+if (wakeResourceDir || wakeTarget) {
+  assert.ok(wakeResourceDir && wakeTarget, "--wake-resource and --wake-target must be provided together.");
+  checkPackagedWakeResource(wakeResourceDir, wakeTarget);
+} else if (process.argv.includes("--output")) {
   checkPackageOutput();
 } else {
   checkCleanupHelper();
 }
 
 console.error("Packaging contract validation passed.");
+
+function checkPackagedWakeResource(resourceDirInput: string, target: string): void {
+  const match = /^(darwin|win32|linux)-(x64|arm64)$/.exec(target);
+  assert.ok(match, `invalid packaged wake target: ${target}`);
+  const platform = match[1] as "darwin" | "win32" | "linux";
+  const arch = match[2] as "x64" | "arm64";
+  const outputDir = realpathSync(join(appDir, "dist-electron"));
+  const resourceDir = realpathSync(resourceDirInput);
+  assert.ok(isInside(outputDir, resourceDir), "packaged wake resource directory must stay inside dist-electron.");
+  assert.ok(existsSync(join(resourceDir, "app.asar")), "target package app.asar is missing.");
+  const validation = validateSherpaVoiceWakeBundle({
+    rootDir: join(resourceDir, "voice-wake", "sherpa-onnx"),
+    platform,
+    arch,
+  });
+  if (!validation.ok) {
+    assert.fail(`packaged wake bundle for ${target} is invalid: ${validation.reason}`);
+  }
+  assert.equal(validation.bundle.platformId, target);
+  const liveKitValidation = validateLiveKitWakeBundle({
+    rootDir: join(resourceDir, "voice-wake", "livekit"),
+    platform,
+    arch,
+  });
+  if (!liveKitValidation.ok) assert.fail(`packaged LiveKit wake bundle for ${target} is invalid: ${liveKitValidation.reason}`);
+}
 
 function checkPackageOutput(): void {
   const outputDir = join(appDir, "dist-electron");
@@ -288,6 +393,14 @@ function checkPackageOutput(): void {
   assert.ok(appResourceDir, "packaged app resources directory was not found.");
   assert.ok(existsSync(join(appResourceDir, "app.asar")), "packaged app.asar is missing.");
   assertBundledOfficialPlugins(appResourceDir);
+  const wakeValidation = validateSherpaVoiceWakeBundle({
+    rootDir: join(appResourceDir, "voice-wake", "sherpa-onnx"),
+  });
+  if (!wakeValidation.ok) {
+    assert.fail(`packaged wake bundle is invalid: ${wakeValidation.reason}`);
+  }
+  const liveKitValidation = validateLiveKitWakeBundle({ rootDir: join(appResourceDir, "voice-wake", "livekit") });
+  if (!liveKitValidation.ok) assert.fail(`packaged LiveKit wake bundle is invalid: ${liveKitValidation.reason}`);
   const appContents = join(appResourceDir, "app.asar.unpacked");
   assert.ok(existsSync(appContents), "packaged app.asar.unpacked resources are missing.");
   assert.ok(existsSync(join(appContents, "node_modules", "@open-pets", "claude", "dist", "index.js")), "packaged @open-pets/claude runtime is missing.");
@@ -379,6 +492,14 @@ function walk(dir: string): string[] {
 function isInside(parent: string, child: string): boolean {
   const rel = relative(parent, child);
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+function valueAfterArgument(flag: string): string | null {
+  const index = process.argv.indexOf(flag);
+  if (index < 0) return null;
+  const value = process.argv[index + 1];
+  assert.ok(value && !value.startsWith("--"), `${flag} requires a value.`);
+  return value;
 }
 
 function checkCleanupHelper(): void {
