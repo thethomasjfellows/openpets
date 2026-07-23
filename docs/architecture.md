@@ -232,10 +232,11 @@ These hold everywhere; the rest of the docs assume them.
   available when another brain is selected. Vision uses it only when that
   target is selected; Codex Vision and OpenAI speech recognition have separate
   host-owned paths. Settings and credentials remain host-owned.
-- **Vision** — the default-off host ability that occasionally screenshots the
-  default pet's display, creates provider-backed context summaries, retains the
-  image and summary locally on a rolling 24-hour cycle, and can be paused or
-  disabled independently of Companion and plugins.
+- **Vision** — the default-off host ability that occasionally screenshots each
+  connected display, labels every image by monitor, creates provider-backed
+  context summaries, retains the images and summaries locally on a rolling
+  24-hour cycle, and can be paused or disabled independently of Companion and
+  plugins.
 - **Companion contribution** — an expiring plugin-supplied fact or proactive
   opportunity. It is untrusted context, never final pet wording, provider
   selection, speech authority, or core memory.

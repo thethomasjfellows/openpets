@@ -17,8 +17,13 @@ import { assertSafeCompanionPetId } from "./companion-settings.js";
 export type VisionStoredEntry = {
   readonly id: string;
   readonly petId: string;
+  readonly captureGroupId?: string;
   readonly capturedAt: number;
   readonly expiresAt: number;
+  readonly displayId?: string;
+  readonly displayLabel?: string;
+  readonly displayBounds?: VisionDisplayBounds;
+  readonly primaryDisplay?: boolean;
   readonly screenshotFileName: string;
   readonly screenshotBytes: number;
   readonly mimeType: "image/png" | "image/jpeg";
@@ -32,6 +37,14 @@ export type VisionContextSummary = {
   readonly id: string;
   readonly capturedAt: number;
   readonly summaryText: string;
+  readonly displayLabel?: string;
+};
+
+export type VisionDisplayBounds = {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
 };
 
 export type VisionStoreSnapshot = {
@@ -48,7 +61,12 @@ export type VisionStoreSnapshot = {
 export type AddVisionEntryInput = {
   readonly id?: string;
   readonly petId: string;
+  readonly captureGroupId?: string;
   readonly capturedAt?: number;
+  readonly displayId?: string;
+  readonly displayLabel?: string;
+  readonly displayBounds?: VisionDisplayBounds;
+  readonly primaryDisplay?: boolean;
   readonly screenshot: Uint8Array;
   readonly mimeType?: "image/png" | "image/jpeg";
   readonly summaryText: string;
@@ -58,7 +76,7 @@ export type AddVisionEntryInput = {
 };
 
 export const visionRetentionMs = 24 * 60 * 60 * 1_000;
-export const maxVisionEntries = 72;
+export const maxVisionEntries = 192;
 export const maxVisionScreenshotBytes = 1 * 1_024 * 1_024;
 export const maxVisionRetainedScreenshotBytes = 48 * 1_024 * 1_024;
 export const maxVisionSummaryCharacters = 900;
@@ -109,6 +127,9 @@ export class VisionStore {
     assertSafeCompanionPetId(input.petId);
     const id = input.id ?? randomUUID();
     if (!safeEntryIdPattern.test(id)) throw new Error("Invalid Vision entry id.");
+    if (input.captureGroupId !== undefined && !safeEntryIdPattern.test(input.captureGroupId)) {
+      throw new Error("Invalid Vision capture group id.");
+    }
     if (this.#entries.some((entry) => entry.id === id)) throw new Error("Vision entry id already exists.");
     if (!(input.screenshot instanceof Uint8Array) || input.screenshot.byteLength === 0
       || input.screenshot.byteLength > maxVisionScreenshotBytes) {
@@ -125,8 +146,13 @@ export class VisionStore {
     const entry: VisionStoredEntry = {
       id,
       petId: input.petId,
+      ...(input.captureGroupId ? { captureGroupId: input.captureGroupId } : {}),
       capturedAt,
       expiresAt: capturedAt + visionRetentionMs,
+      ...(normalizeDisplayId(input.displayId) ? { displayId: normalizeDisplayId(input.displayId) } : {}),
+      ...(normalizeDisplayLabel(input.displayLabel) ? { displayLabel: normalizeDisplayLabel(input.displayLabel) } : {}),
+      ...(normalizeDisplayBounds(input.displayBounds) ? { displayBounds: normalizeDisplayBounds(input.displayBounds) } : {}),
+      ...(typeof input.primaryDisplay === "boolean" ? { primaryDisplay: input.primaryDisplay } : {}),
       screenshotFileName,
       screenshotBytes: input.screenshot.byteLength,
       mimeType,
@@ -171,7 +197,12 @@ export class VisionStore {
     return this.#entries
       .filter((entry) => entry.petId === input.petId)
       .slice(-limit)
-      .map((entry) => ({ id: entry.id, capturedAt: entry.capturedAt, summaryText: entry.summaryText }));
+      .map((entry) => ({
+        id: entry.id,
+        capturedAt: entry.capturedAt,
+        summaryText: entry.summaryText,
+        ...(entry.displayLabel ? { displayLabel: entry.displayLabel } : {}),
+      }));
   }
 
   prune(now = Date.now()): VisionStoreSnapshot {
@@ -264,8 +295,15 @@ export class VisionStore {
       candidates.push({
         id: item.id,
         petId: item.petId,
+        ...(typeof item.captureGroupId === "string" && safeEntryIdPattern.test(item.captureGroupId)
+          ? { captureGroupId: item.captureGroupId }
+          : {}),
         capturedAt,
         expiresAt: capturedAt + visionRetentionMs,
+        ...(normalizeDisplayId(item.displayId) ? { displayId: normalizeDisplayId(item.displayId) } : {}),
+        ...(normalizeDisplayLabel(item.displayLabel) ? { displayLabel: normalizeDisplayLabel(item.displayLabel) } : {}),
+        ...(normalizeDisplayBounds(item.displayBounds) ? { displayBounds: normalizeDisplayBounds(item.displayBounds) } : {}),
+        ...(typeof item.primaryDisplay === "boolean" ? { primaryDisplay: item.primaryDisplay } : {}),
         screenshotFileName: item.screenshotFileName,
         screenshotBytes,
         mimeType,
@@ -362,6 +400,28 @@ function normalizeSummary(value: unknown): string {
 
 function normalizeModel(value: unknown): string {
   return typeof value === "string" ? value.replace(/\0/g, "").trim().slice(0, 120) : "";
+}
+
+function normalizeDisplayId(value: unknown): string {
+  return typeof value === "string" ? value.replace(/\0/g, "").trim().slice(0, 120) : "";
+}
+
+function normalizeDisplayLabel(value: unknown): string {
+  return typeof value === "string" ? value.replace(/\0/g, "").replace(/\s+/g, " ").trim().slice(0, 80) : "";
+}
+
+function normalizeDisplayBounds(value: unknown): VisionDisplayBounds | undefined {
+  if (!isRecord(value)) return undefined;
+  const numbers = [value.x, value.y, value.width, value.height];
+  if (!numbers.every((part) => typeof part === "number" && Number.isFinite(part))) return undefined;
+  const [x, y, width, height] = numbers as [number, number, number, number];
+  if (width <= 0 || height <= 0) return undefined;
+  return {
+    x: Math.floor(x),
+    y: Math.floor(y),
+    width: Math.floor(width),
+    height: Math.floor(height),
+  };
 }
 
 function normalizeTimestamp(value: number): number {

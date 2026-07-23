@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import type {
   HostAiImageSummaryHealthSnapshot,
   HostAiImageOptions,
@@ -415,54 +417,78 @@ export class VisionService {
       }
       this.#state = "capturing";
       this.#emitChanged();
-      const captured = await this.#capture.capture(controller.signal);
-      this.#lastCaptureAt = this.#now();
+      const capturedScreens = await this.#capture.capture(controller.signal);
+      if (capturedScreens.length === 0) throw new Error("Vision did not receive a screenshot from any connected monitor.");
+      const capturedAt = this.#now();
+      const captureGroupId = randomUUID();
+      this.#lastCaptureAt = capturedAt;
       if (generation !== this.#generation || controller.signal.aborted || !this.#isCaptureSessionEligible(petId)) return;
 
       this.#state = "summarizing";
       this.#emitChanged();
-      const summary = await this.#aiGateway.summarizeImage({
-        image: captured.image,
-        mimeType: captured.mimeType,
-        prompt: visionSummaryPrompt,
-        maxTokens: 300,
-      }, { signal: controller.signal });
-      if (generation !== this.#generation || controller.signal.aborted || !this.#isCaptureSessionEligible(petId)) return;
-      if (!summary.text.trim()) {
-        this.#summaryHealth = {
-          status: "error",
-          configured: true,
-          ready: false,
-          provider: summary.provider,
-          model: summary.model,
-          checkedAt: this.#now(),
-          stale: false,
-          error: "The configured AI provider returned an empty image summary. Choose a vision-capable model or provider.",
-        };
-        this.#state = "error";
-        this.#log("warn", "Vision summary was empty");
-        return;
+      const completedScreens: {
+        readonly captured: (typeof capturedScreens)[number];
+        readonly summary: HostAiImageSummaryResult;
+      }[] = [];
+      for (const captured of capturedScreens) {
+        const boundsDescription = captured.displayBounds
+          ? ` Its desktop bounds are x=${captured.displayBounds.x}, y=${captured.displayBounds.y}, width=${captured.displayBounds.width}, height=${captured.displayBounds.height}.`
+          : "";
+        const summary = await this.#aiGateway.summarizeImage({
+          image: captured.image,
+          mimeType: captured.mimeType,
+          prompt: `${visionSummaryPrompt} This screenshot is from ${captured.displayLabel}.${boundsDescription}`,
+          maxTokens: 300,
+        }, { signal: controller.signal });
+        if (generation !== this.#generation || controller.signal.aborted || !this.#isCaptureSessionEligible(petId)) return;
+        if (!summary.text.trim()) {
+          this.#summaryHealth = {
+            status: "error",
+            configured: true,
+            ready: false,
+            provider: summary.provider,
+            model: summary.model,
+            checkedAt: this.#now(),
+            stale: false,
+            error: "The configured AI provider returned an empty image summary. Choose a vision-capable model or provider.",
+          };
+          this.#state = "error";
+          this.#log("warn", "Vision summary was empty", { display: captured.displayLabel });
+          return;
+        }
+        completedScreens.push({ captured, summary });
       }
 
       const completedAt = this.#now();
-      const stored = this.#store.addCompletedEntry({
-        petId,
-        capturedAt: this.#lastCaptureAt,
-        screenshot: captured.image,
-        mimeType: captured.mimeType,
-        summaryText: summary.text,
-        summaryCreatedAt: completedAt,
-        provider: summary.provider,
-        model: summary.model,
-      });
-      if (!stored.persisted) {
-        this.#state = "error";
-        this.#log("warn", "Vision capture could not be persisted", { retainedEntries: this.#store.snapshot(completedAt).entries.length });
-        return;
+      for (const { captured, summary } of completedScreens) {
+        const stored = this.#store.addCompletedEntry({
+          petId,
+          captureGroupId,
+          capturedAt,
+          displayId: captured.displayId,
+          displayLabel: captured.displayLabel,
+          ...(captured.displayBounds ? { displayBounds: captured.displayBounds } : {}),
+          primaryDisplay: captured.primary,
+          screenshot: captured.image,
+          mimeType: captured.mimeType,
+          summaryText: summary.text,
+          summaryCreatedAt: completedAt,
+          provider: summary.provider,
+          model: summary.model,
+        });
+        if (!stored.persisted) {
+          this.#state = "error";
+          this.#log("warn", "Vision capture could not be persisted", {
+            display: captured.displayLabel,
+            retainedEntries: this.#store.snapshot(completedAt).entries.length,
+          });
+          return;
+        }
       }
       this.#lastSummaryAt = completedAt;
       this.#state = "ready";
       this.#log("info", "Vision capture completed", {
+        monitors: completedScreens.length,
         retainedEntries: this.#store.snapshot(completedAt).entries.length,
       });
     } catch (error) {

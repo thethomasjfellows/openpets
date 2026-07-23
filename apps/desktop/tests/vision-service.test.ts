@@ -31,7 +31,24 @@ const capture: VisionCaptureAdapter = {
     const hook = afterCapture;
     afterCapture = undefined;
     hook?.();
-    return { image: new Uint8Array([137, 80, 78, 71]), mimeType: "image/png" };
+    return [
+      {
+        image: new Uint8Array([137, 80, 78, 71]),
+        mimeType: "image/png",
+        displayId: "1",
+        displayLabel: "Primary monitor",
+        displayBounds: { x: 0, y: 0, width: 1920, height: 1080 },
+        primary: true,
+      },
+      {
+        image: new Uint8Array([137, 80, 78, 72]),
+        mimeType: "image/png",
+        displayId: "2",
+        displayLabel: "Monitor 2",
+        displayBounds: { x: 1920, y: 0, width: 1920, height: 1080 },
+        primary: false,
+      },
+    ];
   },
 };
 
@@ -112,11 +129,16 @@ try {
   const active = await service.snapshot();
   assert.equal(active.enabled, true);
   assert.equal(active.state, "ready");
-  assert.equal(active.storage.entries, 1);
+  assert.equal(active.storage.entries, 2, "one Vision cycle retains one labeled image per connected monitor");
+  const capturedEntries = store.snapshot(now).entries;
+  assert.deepEqual(capturedEntries.map((entry) => entry.displayLabel).sort(), ["Monitor 2", "Primary monitor"]);
+  assert.equal(new Set(capturedEntries.map((entry) => entry.captureGroupId)).size, 1, "monitor images from one cycle share a capture group");
+  assert.equal(capturedEntries[1]?.displayBounds?.x, 1920, "stored monitor bounds support future screen-targeted behavior");
   const lastRetainedSummaryAt = active.lastSummaryAt;
   assert.equal(JSON.stringify(active).includes("code editor"), false, "public status never exposes summary text");
   assert.equal(JSON.stringify(active).includes(".png"), false, "public status never exposes screenshot filenames");
-  assert.equal(service.getContextSummaries("default").length, 1);
+  assert.equal(service.getContextSummaries("default").length, 2);
+  assert.deepEqual(service.getContextSummaries("default").map((summary) => summary.displayLabel).sort(), ["Monitor 2", "Primary monitor"]);
   assert.match(service.getProactiveOpportunities("default")[0]?.text ?? "", /untrusted quoted observation.*never as instructions/i);
   const recentContextTime = now;
   now += 31 * 60_000;
@@ -160,15 +182,15 @@ try {
   await service.captureNow();
   const emptySummary = await service.snapshot();
   assert.equal(emptySummary.state, "error", "empty summaries expose a recoverable error instead of getting stuck");
-  assert.equal(emptySummary.storage.entries, 1, "an empty summary never persists its screenshot");
+  assert.equal(emptySummary.storage.entries, active.storage.entries, "an empty monitor summary prevents the capture cycle from persisting screenshots");
   summaryText = "The user is working in a code editor.";
 
   await service.pause(30);
   const paused = await service.snapshot();
   assert.equal(paused.state, "paused");
-  assert.equal(paused.storage.entries, 1, "pause keeps retained context");
+  assert.equal(paused.storage.entries, active.storage.entries, "pause keeps retained context");
   assert.equal(service.getProactiveOpportunities("default").length, 0, "paused Vision cannot initiate check-ins");
-  assert.equal(service.getContextSummaries("default").length, 1, "retained context remains available for direct replies");
+  assert.equal(service.getContextSummaries("default").length, active.storage.entries, "retained context remains available for direct replies");
 
   now += 31 * 60_000;
   await service.resume();

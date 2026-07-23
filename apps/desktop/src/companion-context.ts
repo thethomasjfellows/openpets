@@ -19,6 +19,7 @@ export type CompanionVisionSummary = {
   readonly id: string;
   readonly capturedAt: number;
   readonly summaryText: string;
+  readonly displayLabel?: string;
 };
 
 export type CompanionContext = {
@@ -159,11 +160,14 @@ function selectVisionSummaries(
       && Number.isFinite(summary.capturedAt)
       && summary.capturedAt >= cutoff
       && summary.capturedAt <= now + 5 * 60 * 1_000)
-    .map((summary) => ({
-      id: summary.id,
-      capturedAt: Math.floor(summary.capturedAt),
-      summaryText: normalizeInlineText(summary.summaryText, maxVisionSummaryCharacters),
-    }))
+      .map((summary) => ({
+        id: summary.id,
+        capturedAt: Math.floor(summary.capturedAt),
+        summaryText: normalizeInlineText(summary.summaryText, maxVisionSummaryCharacters),
+        ...(normalizeInlineText(summary.displayLabel, 80)
+          ? { displayLabel: normalizeInlineText(summary.displayLabel, 80) }
+          : {}),
+      }))
     .filter((summary) => Boolean(summary.summaryText))
     .sort((left, right) => left.capturedAt - right.capturedAt || compareAscii(left.id, right.id))
     .slice(-maxVisionSummaries);
@@ -263,7 +267,8 @@ function formatVisionSummaries(summaries: readonly CompanionVisionSummary[]): st
 }
 
 function formatVisionSummary(summary: CompanionVisionSummary): string {
-  return `- ${new Date(summary.capturedAt).toISOString()}: ${JSON.stringify(summary.summaryText)}`;
+  const display = summary.displayLabel ? ` [${summary.displayLabel}]` : "";
+  return `- ${new Date(summary.capturedAt).toISOString()}${display}: ${JSON.stringify(summary.summaryText)}`;
 }
 
 function formatMemory(entries: readonly CompanionMemoryEntry[]): string {

@@ -36,7 +36,7 @@ try {
   assert.equal(first.persisted, true);
   assert.equal(store.getContextSummaries({ petId: "default", now }).length, 1);
   const context = store.getContextSummaries({ petId: "default", now })[0]!;
-  assert.deepEqual(Object.keys(context).sort(), ["capturedAt", "id", "summaryText"], "context never exposes screenshot paths or bytes");
+  assert.deepEqual(Object.keys(context).sort(), ["capturedAt", "id", "summaryText"], "legacy context never exposes screenshot paths or bytes");
   assert.throws(() => store.addCompletedEntry({
     id: "first",
     petId: "default",
@@ -52,7 +52,12 @@ try {
   const compressed = store.addCompletedEntry({
     id: "compressed",
     petId: "default",
+    captureGroupId: "cycle-1",
     capturedAt: now,
+    displayId: "42",
+    displayLabel: "Monitor 2",
+    displayBounds: { x: 1920, y: 0, width: 1920, height: 1080 },
+    primaryDisplay: false,
     screenshot: new Uint8Array([255, 216, 255, 217]),
     mimeType: "image/jpeg",
     summaryText: "The user is reviewing a dashboard.",
@@ -62,6 +67,9 @@ try {
   assert.equal(compressed.entry.screenshotFileName, "compressed.jpg");
   assert.equal(compressed.entry.mimeType, "image/jpeg");
   assert.equal(compressed.entry.provider, "openrouter", "OpenRouter Vision context remains valid after persistence");
+  assert.equal(compressed.entry.displayLabel, "Monitor 2");
+  assert.equal(compressed.entry.captureGroupId, "cycle-1");
+  assert.equal(store.getContextSummaries({ petId: "default", now }).at(-1)?.displayLabel, "Monitor 2", "context includes only the safe monitor label");
   assert.equal(existsSync(join(store.screenshotsDirectory, "compressed.jpg")), true);
 
   store.addCompletedEntry({

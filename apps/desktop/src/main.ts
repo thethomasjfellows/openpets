@@ -11,7 +11,7 @@ import { isDesktopPermissionRestart } from "./desktop-permissions.js";
 import { initializeCompanionMemory } from "./companion-memory.js";
 import { getCompanionSettings, initializeCompanionSettings } from "./companion-settings.js";
 import { setLocaleFromPreference } from "./i18n/index.js";
-import { getDefaultPetPaused, getDefaultPetWindowForPlugins, installDefaultPetDisplayHandlers, isDefaultPetVisible, shouldOpenDefaultPetOnLaunch, showDefaultPet } from "./default-pet-controller.js";
+import { getDefaultPetPaused, installDefaultPetDisplayHandlers, isDefaultPetVisible, shouldOpenDefaultPetOnLaunch, showDefaultPet } from "./default-pet-controller.js";
 import { installAppLifecycle } from "./lifecycle.js";
 import { startLanController } from "./lan-controller.js";
 import { debug, error as logError, getLogFilePath, info, initializeLogger, warn } from "./logger.js";
@@ -152,9 +152,7 @@ if (!gotSingleInstanceLock) {
     }
     initializeVisionService({
       store: visionStore,
-      capture: createElectronVisionCapture({
-        getDefaultPetBounds: () => getDefaultPetWindowForPlugins()?.getBounds() ?? null,
-      }),
+        capture: createElectronVisionCapture(),
       aiGateway: new VisionAiRouter(getCodexAiBrain(), pluginCapabilities.aiGateway),
       getDefaultPetId: () => getAppStateSnapshot().preferences.defaultPetId,
       isDefaultPetVisible,

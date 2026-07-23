@@ -324,15 +324,18 @@ and diagnosable:
   but a Vision limitation never disables a working conversational brain. The
   Vision result links directly to Pet Vision settings.
 
-Vision is host-owned rather than a plugin. `vision-service.ts` captures the
-screen containing the visible, unpaused default pet after a 30-second enable
-delay and then roughly every 20–25 minutes. It stops capture while disabled,
+Vision is host-owned rather than a plugin. `vision-service.ts` captures every
+connected monitor after a 30-second enable delay and then roughly every 20–25
+minutes while the default pet is visible and unpaused. It stops capture while disabled,
 paused, suspended, locked, or while the default pet is hidden/paused. The
 service rechecks the same pet ID, visibility, and pause state before capture,
 after capture, and before persistence so an in-flight eligibility change cannot
-retain or summarize a late screenshot. The
+retain or summarize late screenshots. All monitor images from a cycle share a
+capture-group ID. Each image is labeled as the primary monitor or a numbered
+secondary monitor and retains the display ID and bounds needed for future
+screen-targeted companion behavior. The
 Electron adapter checks OS screen-capture permission and encodes a bounded
-1280×800 JPEG for the image input. `VisionAiRouter` sends the screenshot to the selected
+1280×800 JPEG for each image input. `VisionAiRouter` sends each screenshot to the selected
 global AI Brain: Codex receives it through the official CLI image input, while
 the direct API target uses Anthropic, OpenAI, OpenRouter, Ollama, or a custom
 OpenAI-compatible image input. Both receive an instruction to produce
@@ -355,7 +358,7 @@ Screenshots and summaries live under `userData/openpets-vision/` and are pruned
 on startup, reads, and a periodic timer. Vision-owned atomic index temp files
 are also removed on startup, pruning, and disable so a crash cannot extend
 summary retention. Retention is at most 24 hours and is
-also capped at 72 entries, 1 MiB per screenshot, 48 MiB of screenshots, 900
+also capped at 192 entries, 1 MiB per screenshot, 48 MiB of screenshots, 900
 characters per summary, and a 512 KiB index. Pause retains existing context
 until normal expiry but suppresses new capture and proactive Vision candidates.
 Only summaries from roughly the last 30 minutes may create a Vision-aware
@@ -365,7 +368,8 @@ Disabling aborts work and deletes retained screenshots and summaries; the UI
 reports an error instead of claiming deletion if the store cannot confirm it.
 A failed index write likewise remains an error and does not advance the last
 retained-summary timestamp.
-Direct Companion turns receive summary text only. Both direct and proactive
+Direct Companion turns receive summary text plus its non-sensitive monitor
+label, but never display IDs, bounds, image paths, or bytes. Both direct and proactive
 prompts label Vision summaries as untrusted quoted observations that can never
 supply instructions. Vision-driven proactive candidates still pass the same quiet-hours, activity, provider-health, daily
 cap, spacing, expiry, and dedupe policy as every other check-in. Every
