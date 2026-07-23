@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -71,6 +71,34 @@ try {
   assert.equal(compressed.entry.captureGroupId, "cycle-1");
   assert.equal(store.getContextSummaries({ petId: "default", now }).at(-1)?.displayLabel, "Monitor 2", "context includes only the safe monitor label");
   assert.equal(existsSync(join(store.screenshotsDirectory, "compressed.jpg")), true);
+  const inspectionScreens = store.getRecentInspectionScreens({ petId: "default", now });
+  assert.equal(inspectionScreens.length, 1, "on-demand inspection reads only the newest capture group");
+  assert.deepEqual(inspectionScreens[0]?.image, new Uint8Array([255, 216, 255, 217]));
+  assert.equal(inspectionScreens[0]?.displayLabel, "Monitor 2");
+  assert.deepEqual(
+    Object.keys(inspectionScreens[0] ?? {}).sort(),
+    ["capturedAt", "displayBounds", "displayId", "displayLabel", "id", "image", "mimeType", "primaryDisplay"],
+    "inspection data exposes image bytes in the main process without leaking a storage path",
+  );
+
+  store.addCompletedEntry({
+    id: "rollback-primary",
+    petId: "default",
+    captureGroupId: "rollback-cycle",
+    capturedAt: now + 1,
+    screenshot: new Uint8Array([1, 2, 3]),
+    summaryText: "Incomplete primary display.",
+    provider: "openai",
+    model: "gpt-4o-mini",
+  });
+  rmSync(store.indexPath, { force: true });
+  mkdirSync(store.indexPath);
+  const failedRollback = store.deleteCaptureGroup("rollback-cycle");
+  assert.equal(failedRollback.persisted, false, "the regression fixture forces rollback index persistence to fail");
+  assert.equal(store.getRecentInspectionScreens({ petId: "default", now: now + 1 }).some((screen) => screen.id === "rollback-primary"), false, "failed rollback persistence still removes the partial group from live inspection");
+  assert.equal(existsSync(join(store.screenshotsDirectory, "rollback-primary.png")), false, "failed rollback persistence removes bytes so a stale index cannot resurrect the group");
+  rmSync(store.indexPath, { recursive: true, force: true });
+  store.prune(now + 1);
 
   store.addCompletedEntry({
     id: "expired",

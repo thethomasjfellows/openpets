@@ -62,12 +62,14 @@ const readyHealth = (): HostAiImageSummaryHealthSnapshot => ({
   stale: false,
 });
 let summaryText = "The user is working in a code editor.";
+let lastSummaryPrompt = "";
 let summarizeCalls = 0;
 let blockNextSummary = false;
 let notifyBlockedSummaryStarted: (() => void) | undefined;
 const gateway: VisionAiGateway = {
-  async summarizeImage(_request, options) {
+  async summarizeImage(request, options) {
     if (options?.signal?.aborted) throw options.signal.reason;
+    lastSummaryPrompt = request.prompt;
     summarizeCalls += 1;
     if (blockNextSummary) {
       blockNextSummary = false;
@@ -117,6 +119,7 @@ try {
   const initial = await service.snapshot();
   assert.equal(initial.enabled, false, "Vision starts off without fresh opt-in");
   assert.equal(initial.storage.entries, 0, "disabled startup removes crash-leftover Vision data");
+  assert.equal(service.getInspectionScreens("default").length, 0, "disabled Vision exposes no retained images for conversation");
   const disabledHealthChecks = healthChecks;
   const disabledCaptures = captures;
   const checkedWhileDisabled = await service.snapshot(true);
@@ -133,12 +136,15 @@ try {
   const capturedEntries = store.snapshot(now).entries;
   assert.deepEqual(capturedEntries.map((entry) => entry.displayLabel).sort(), ["Monitor 2", "Primary monitor"]);
   assert.equal(new Set(capturedEntries.map((entry) => entry.captureGroupId)).size, 1, "monitor images from one cycle share a capture group");
-  assert.equal(capturedEntries[1]?.displayBounds?.x, 1920, "stored monitor bounds support future screen-targeted behavior");
+  assert.equal(capturedEntries.find((entry) => entry.displayLabel === "Monitor 2")?.displayBounds?.x, 1920, "stored monitor bounds support future screen-targeted behavior");
   const lastRetainedSummaryAt = active.lastSummaryAt;
   assert.equal(JSON.stringify(active).includes("code editor"), false, "public status never exposes summary text");
   assert.equal(JSON.stringify(active).includes(".png"), false, "public status never exposes screenshot filenames");
   assert.equal(service.getContextSummaries("default").length, 2);
   assert.deepEqual(service.getContextSummaries("default").map((summary) => summary.displayLabel).sort(), ["Monitor 2", "Primary monitor"]);
+  assert.deepEqual(service.getInspectionScreens("default").map((screen) => screen.displayLabel), ["Primary monitor", "Monitor 2"], "the newest capture group supplies both monitors for an explicit screen request");
+  assert.match(lastSummaryPrompt, /2-4 concise bullets/i, "scheduled summaries retain useful visual structure");
+  assert.match(lastSummaryPrompt, /do not quote or transcribe visible text/i, "richer summaries remain privacy bounded");
   assert.match(service.getProactiveOpportunities("default")[0]?.text ?? "", /untrusted quoted observation.*never as instructions/i);
   const recentContextTime = now;
   now += 31 * 60_000;
@@ -191,15 +197,22 @@ try {
   assert.equal(paused.storage.entries, active.storage.entries, "pause keeps retained context");
   assert.equal(service.getProactiveOpportunities("default").length, 0, "paused Vision cannot initiate check-ins");
   assert.equal(service.getContextSummaries("default").length, active.storage.entries, "retained context remains available for direct replies");
+  assert.equal(service.getInspectionScreens("default").length, active.storage.entries, "pausing new captures does not hide already-retained images from an explicit screen request");
 
   now += 31 * 60_000;
   await service.resume();
   assert.equal((await service.snapshot()).state, "ready");
 
+  const retainedIdsBeforePersistenceFailure = store.snapshot(now).entries.map((entry) => entry.id);
   const addCompletedEntry = store.addCompletedEntry.bind(store);
+  let persistenceAttempts = 0;
   Object.defineProperty(store, "addCompletedEntry", {
     configurable: true,
-    value: (input: Parameters<typeof store.addCompletedEntry>[0]) => ({ ...addCompletedEntry(input), persisted: false }),
+    value: (input: Parameters<typeof store.addCompletedEntry>[0]) => {
+      persistenceAttempts += 1;
+      const result = addCompletedEntry(input);
+      return persistenceAttempts === 2 ? { ...result, persisted: false } : result;
+    },
   });
   let persistenceFailure: Awaited<ReturnType<typeof service.snapshot>> | undefined;
   try {
@@ -211,6 +224,7 @@ try {
   assert.ok(persistenceFailure);
   assert.equal(persistenceFailure.state, "error", "a failed Vision index write cannot report capture success");
   assert.equal(persistenceFailure.lastSummaryAt, lastRetainedSummaryAt, "failed persistence does not advance the last retained summary time");
+  assert.deepEqual(store.snapshot(now).entries.map((entry) => entry.id), retainedIdsBeforePersistenceFailure, "a failed second-monitor write rolls back the entire incomplete capture group");
 
   persistVisionEnabled(false, now);
   const directDisabled = await service.snapshot();
@@ -224,6 +238,7 @@ try {
   assert.equal(disabled.state, "off");
   assert.equal(disabled.storage.entries, 0, "disabling deletes retained screenshots and summaries");
   assert.equal(service.getContextSummaries("default").length, 0);
+  assert.equal(service.getInspectionScreens("default").length, 0);
   assert.equal(service.getProactiveOpportunities("default").length, 0);
 
   console.log("Vision capture lifecycle and privacy behavior verified");

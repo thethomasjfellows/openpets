@@ -113,6 +113,16 @@
   .settings-row-info { @apply flex-1 min-w-0; }
   .settings-row-info strong { @apply block text-sm font-bold text-navy; }
   .settings-row-info small { @apply mt-0.5 block text-xs leading-relaxed text-slatecopy; }
+  .settings-select-row .settings-row-info { @apply basis-[44%]; }
+  .settings-select-row > .settings-select { flex: 0 1 520px; width: min(48%, 520px); max-width: 100%; }
+  .settings-row-controls { @apply flex min-w-0 flex-[0_1_560px] items-center justify-end gap-3; }
+  .settings-row-controls .settings-select { @apply min-w-0 flex-1; max-width: 480px; }
+  @media (max-width: 900px) {
+    .settings-select-row { @apply flex-col items-stretch; }
+    .settings-select-row .settings-row-info { @apply basis-auto; }
+    .settings-select-row > .settings-select { width: 100%; flex-basis: auto; }
+    .settings-row-controls { @apply w-full flex-none justify-between; }
+  }
 
   .settings-toggle { @apply h-6 w-11 shrink-0 cursor-pointer accent-brand disabled:cursor-not-allowed; }
   .settings-select { @apply min-h-10 min-w-[140px] rounded-xl border border-blue-200/80 bg-white/80 px-3 py-2 text-sm font-semibold text-navy outline-none focus:border-brand focus:ring-4 focus:ring-brand/15 disabled:cursor-not-allowed disabled:opacity-60; }

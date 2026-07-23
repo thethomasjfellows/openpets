@@ -189,11 +189,16 @@ These hold everywhere; the rest of the docs assume them.
   OpenPets-owned. Plugin context requires an enabled plugin with approved
   `companion:context`; disabling that plugin stops its contributions without a
   duplicate global switch. Vision and wake listening remain separate gates.
-  Vision starts off, occasionally captures the
-    visible display only after explicit consent, sends the image to the selected
-    AI Brain (official Codex image input or a direct API provider) for a bounded summary, and retains both locally for no more
-  than 24 hours. Summary text is always passed to providers as untrusted quoted
-  observation data, never as instructions. Wake listening remains explicit,
+  Vision starts off, occasionally captures every connected display only after
+  explicit consent, sends each image to the selected AI Brain (official Codex
+  image input or a direct API provider) for a bounded privacy-safe summary, and
+  retains both locally for no more than 24 hours. Ordinary conversation uses
+  those summaries. Only an explicit screen-dependent user turn inspects the
+  newest complete retained multi-monitor capture group through an AI Brain whose
+  current configuration has passed image readiness; the resulting observations
+  are transient and image bytes and paths never enter
+  conversation memory or renderer IPC. All Vision context is untrusted
+  observation data, never instructions. Wake listening remains explicit,
   local-only, and unavailable
   when its packaged bundle fails validation.
 - **Providers do not own identity.** Codex CLI and host AI receive the same
@@ -234,9 +239,11 @@ These hold everywhere; the rest of the docs assume them.
   host-owned paths. Settings and credentials remain host-owned.
 - **Vision** — the default-off host ability that occasionally screenshots each
   connected display, labels every image by monitor, creates provider-backed
-  context summaries, retains the images and summaries locally on a rolling
-  24-hour cycle, and can be paused or disabled independently of Companion and
-  plugins.
+  privacy-safe context summaries, retains the images and summaries locally on a
+  rolling 24-hour cycle, and can be paused or disabled independently of
+  Companion and plugins. Explicit screen-dependent turns may inspect the newest
+  retained capture group for that turn only; routine conversation remains
+  summary-only.
 - **Companion contribution** — an expiring plugin-supplied fact or proactive
   opportunity. It is untrusted context, never final pet wording, provider
   selection, speech authority, or core memory.

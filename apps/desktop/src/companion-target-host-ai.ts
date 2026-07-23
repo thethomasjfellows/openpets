@@ -1,5 +1,12 @@
 import { HostAiGateway, type HostAiHealthSnapshot } from "./host-ai-gateway.js";
-import type { CompanionTarget, CompanionTargetHealth, CompanionTargetRequest, CompanionTargetResult } from "./companion-targets.js";
+import type {
+  CompanionTarget,
+  CompanionTargetHealth,
+  CompanionTargetImageInspectionRequest,
+  CompanionTargetImageInspectionResult,
+  CompanionTargetRequest,
+  CompanionTargetResult,
+} from "./companion-targets.js";
 
 export class HostAiCompanionTarget implements CompanionTarget {
   readonly id = "host-ai" as const;
@@ -43,6 +50,14 @@ export class HostAiCompanionTarget implements CompanionTarget {
     };
   }
 
+  configurationKey(): Promise<string> {
+    return this.#gateway.getConfigurationKey();
+  }
+
+  async imageInspectionReady(): Promise<boolean> {
+    return (await this.#gateway.getImageSummaryHealthSnapshot()).ready;
+  }
+
   async send(request: CompanionTargetRequest): Promise<CompanionTargetResult> {
     if (request.signal.aborted) throw abortError();
     const result = await this.#gateway.complete({
@@ -53,6 +68,15 @@ export class HostAiCompanionTarget implements CompanionTarget {
     const text = result.text.trim();
     if (!text) throw new Error("The configured AI provider returned an empty response.");
     return { text };
+  }
+
+  async inspectImage(request: CompanionTargetImageInspectionRequest): Promise<CompanionTargetImageInspectionResult> {
+    return this.#gateway.summarizeImage({
+      image: request.image,
+      mimeType: request.mimeType,
+      prompt: request.prompt,
+      maxTokens: 260,
+    }, { signal: request.signal });
   }
 
   dispose(): void {

@@ -1,11 +1,24 @@
 import { CodexConversationTarget } from "./voice-conversation-codex.js";
 import { getCompanionSettings } from "./companion-settings.js";
-import type { CompanionTarget, CompanionTargetHealth, CompanionTargetRequest, CompanionTargetResult } from "./companion-targets.js";
+import type {
+  CompanionTarget,
+  CompanionTargetHealth,
+  CompanionTargetImageInspectionRequest,
+  CompanionTargetImageInspectionResult,
+  CompanionTargetRequest,
+  CompanionTargetResult,
+} from "./companion-targets.js";
+
+type CodexImageInspector = (request: CompanionTargetImageInspectionRequest) => Promise<CompanionTargetImageInspectionResult>;
+type CodexImageReadiness = () => boolean | Promise<boolean>;
 
 export class CodexCompanionTarget implements CompanionTarget {
   readonly id = "codex" as const;
   readonly #target: CodexConversationTarget;
   readonly #integrationStatus: () => Promise<{ readonly state: string; readonly detected?: boolean; readonly supported?: boolean }>;
+  readonly #imageInspector?: CodexImageInspector;
+  readonly #configurationKey: () => string | Promise<string>;
+  readonly #imageReadiness: CodexImageReadiness;
 
   constructor(
     target: CodexConversationTarget = new CodexConversationTarget({
@@ -13,9 +26,18 @@ export class CodexCompanionTarget implements CompanionTarget {
       getReasoningEffort: () => getCompanionSettings().codex.reasoningEffort,
     }),
     integrationStatus: () => Promise<{ readonly state: string; readonly detected?: boolean; readonly supported?: boolean }> = async () => (await import("./agent-setup.js")).getCodexIntegrationStatus(),
+    imageInspector?: CodexImageInspector,
+    configurationKey: () => string | Promise<string> = () => {
+      const settings = getCompanionSettings().codex;
+      return `codex\u0000${settings.model ?? ""}\u0000${settings.reasoningEffort ?? ""}`;
+    },
+    imageReadiness: CodexImageReadiness = () => false,
   ) {
     this.#target = target;
     this.#integrationStatus = integrationStatus;
+    this.#imageInspector = imageInspector;
+    this.#configurationKey = configurationKey;
+    this.#imageReadiness = imageReadiness;
   }
 
   async health(force = false): Promise<CompanionTargetHealth> {
@@ -41,6 +63,14 @@ export class CodexCompanionTarget implements CompanionTarget {
     };
   }
 
+  configurationKey(): string | Promise<string> {
+    return this.#configurationKey();
+  }
+
+  imageInspectionReady(): boolean | Promise<boolean> {
+    return this.#imageReadiness();
+  }
+
   async send(request: CompanionTargetRequest): Promise<CompanionTargetResult> {
     const result = await this.#target.sendText({
       text: request.prompt,
@@ -49,6 +79,11 @@ export class CodexCompanionTarget implements CompanionTarget {
       onEvent: request.onEvent,
     });
     return result;
+  }
+
+  async inspectImage(request: CompanionTargetImageInspectionRequest): Promise<CompanionTargetImageInspectionResult> {
+    if (!this.#imageInspector) throw new Error("Codex image inspection is unavailable in this runtime.");
+    return this.#imageInspector(request);
   }
 
   dispose(): void {

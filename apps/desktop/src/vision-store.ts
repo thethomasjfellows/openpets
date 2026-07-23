@@ -40,6 +40,17 @@ export type VisionContextSummary = {
   readonly displayLabel?: string;
 };
 
+export type VisionInspectionScreen = {
+  readonly id: string;
+  readonly capturedAt: number;
+  readonly displayId?: string;
+  readonly displayLabel?: string;
+  readonly displayBounds?: VisionDisplayBounds;
+  readonly primaryDisplay?: boolean;
+  readonly mimeType: "image/png" | "image/jpeg";
+  readonly image: Uint8Array;
+};
+
 export type VisionDisplayBounds = {
   readonly x: number;
   readonly y: number;
@@ -205,6 +216,63 @@ export class VisionStore {
       }));
   }
 
+  getRecentInspectionScreens(input: {
+    readonly petId: string;
+    readonly now?: number;
+    readonly maxAgeMs?: number;
+    readonly limit?: number;
+    readonly maxTotalBytes?: number;
+  }): readonly VisionInspectionScreen[] {
+    assertSafeCompanionPetId(input.petId);
+    const now = normalizeTimestamp(input.now ?? Date.now());
+    this.prune(now);
+    const maxAgeMs = Math.max(0, Math.min(visionRetentionMs, Math.floor(input.maxAgeMs ?? 30 * 60_000)));
+    const limit = Math.max(0, Math.min(4, Math.floor(input.limit ?? 4)));
+    const maxTotalBytes = Math.max(0, Math.min(4 * 1_024 * 1_024, Math.floor(input.maxTotalBytes ?? 4 * 1_024 * 1_024)));
+    if (limit === 0 || maxTotalBytes === 0) return [];
+
+    const recent = this.#entries.filter((entry) =>
+      entry.petId === input.petId
+      && entry.capturedAt >= now - maxAgeMs
+      && entry.capturedAt <= now + maxFutureSkewMs
+    );
+    const newest = recent.at(-1);
+    if (!newest) return [];
+    const group = newest.captureGroupId
+      ? recent.filter((entry) => entry.captureGroupId === newest.captureGroupId)
+      : recent.filter((entry) => entry.capturedAt === newest.capturedAt);
+    group.sort((left, right) =>
+      Number(right.primaryDisplay === true) - Number(left.primaryDisplay === true)
+      || (left.displayBounds?.x ?? 0) - (right.displayBounds?.x ?? 0)
+      || (left.displayBounds?.y ?? 0) - (right.displayBounds?.y ?? 0)
+      || (left.displayLabel ?? left.id).localeCompare(right.displayLabel ?? right.id)
+    );
+
+    const screens: VisionInspectionScreen[] = [];
+    let totalBytes = 0;
+    for (const entry of group) {
+      if (screens.length >= limit || totalBytes + entry.screenshotBytes > maxTotalBytes) continue;
+      try {
+        const bytes = readFileSync(join(this.screenshotsDirectory, entry.screenshotFileName));
+        if (bytes.byteLength !== entry.screenshotBytes || bytes.byteLength <= 0 || bytes.byteLength > maxVisionScreenshotBytes) continue;
+        totalBytes += bytes.byteLength;
+        screens.push({
+          id: entry.id,
+          capturedAt: entry.capturedAt,
+          ...(entry.displayId ? { displayId: entry.displayId } : {}),
+          ...(entry.displayLabel ? { displayLabel: entry.displayLabel } : {}),
+          ...(entry.displayBounds ? { displayBounds: { ...entry.displayBounds } } : {}),
+          ...(typeof entry.primaryDisplay === "boolean" ? { primaryDisplay: entry.primaryDisplay } : {}),
+          mimeType: entry.mimeType,
+          image: Uint8Array.from(bytes),
+        });
+      } catch {
+        // A missing or unreadable retained image is skipped without exposing its path.
+      }
+    }
+    return screens;
+  }
+
   prune(now = Date.now()): VisionStoreSnapshot {
     const normalizedNow = normalizeTimestamp(now);
     const previousFiles = new Map(this.#entries.map((entry) => [entry.id, entry.screenshotFileName]));
@@ -233,6 +301,25 @@ export class VisionStore {
     this.#cleanupIndexTemps();
     this.#persist();
     return this.#snapshotWithoutPrune();
+  }
+
+  deleteCaptureGroup(captureGroupId: string): { readonly removed: number; readonly persisted: boolean } {
+    if (!safeEntryIdPattern.test(captureGroupId)) throw new Error("Invalid Vision capture group id.");
+    const removedEntries = this.#entries.filter((entry) => entry.captureGroupId === captureGroupId);
+    if (removedEntries.length === 0) return { removed: 0, persisted: this.#persisted };
+    const previous = this.#entries;
+    this.#entries = previous.filter((entry) => entry.captureGroupId !== captureGroupId);
+    if (!this.#persist()) {
+      // Keep the incomplete group inaccessible in memory even if the index
+      // rewrite failed. Removing its files also prevents the stale on-disk
+      // index from resurrecting a partial group after restart.
+      for (const entry of removedEntries) this.#removeScreenshot(entry.screenshotFileName);
+      this.#cleanupOrphans();
+      return { removed: removedEntries.length, persisted: false };
+    }
+    for (const entry of removedEntries) this.#removeScreenshot(entry.screenshotFileName);
+    this.#cleanupOrphans();
+    return { removed: removedEntries.length, persisted: true };
   }
 
   #snapshotWithoutPrune(): VisionStoreSnapshot {

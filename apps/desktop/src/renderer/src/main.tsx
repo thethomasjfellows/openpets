@@ -1841,25 +1841,29 @@ function AiBrainSettingsPanel({ settings, busy, onSettings, onNavigate, onOpenVi
   const activeBrain = companion?.target === "codex" ? "codex" : settings?.provider ?? "none";
   const activeHostHealth = activeBrain !== "codex" && activeBrain !== "none" ? health[activeBrain] : null;
   const activeImageHealth = activeBrain === "none" ? null : imageHealth[activeBrain];
+  const activeBrainReady = activeBrain === "codex" ? codexHealth?.ready === true : activeHostHealth?.ready === true;
+  const activeBrainReason = activeBrain === "none"
+    ? t("settings.aiBrain.chooseProvider")
+    : activeBrain === "codex"
+      ? codexHealth?.reason ?? (activeBrainReady ? t("settings.aiBrain.brainReadyDescription") : t("settings.aiBrain.notChecked"))
+      : activeHostHealth?.error ?? (activeBrainReady ? t("settings.aiBrain.brainReadyDescription") : t("settings.aiBrain.checkCardBelow"));
   return <div className="settings-section">
     <p className="eyebrow">{t("settings.aiBrain.eyebrow")}</p>
     <h2 className="settings-section-title">{t("settings.aiBrain.title")}</h2>
     <p className="text-sm text-slatecopy -mt-2 mb-2">{t("settings.aiBrain.cardsDescription")}</p>
 
     <div className="settings-group ai-brain-selector-card">
-      <VoiceSelectRow
-        title={t("settings.aiBrain.activeSelector")}
-        description={t("settings.aiBrain.activeSelectorDescription")}
-        value={activeBrain}
-        disabled={busy || !companion || !settings}
-        onChange={(value) => value === "codex" ? selectCodex() : selectProvider(value as HostAiProfileId)}
-        options={[
-          { value: "none", label: t("settings.aiBrain.chooseProvider"), disabled: true },
-          { value: "codex", label: t("settings.aiBrain.codex") },
-          ...providerIds.map((provider) => ({ value: provider, label: t(`settings.aiBrain.provider.${provider}`) })),
-        ]}
-      />
-      <div className="settings-row"><div className="settings-row-info"><strong>{t("settings.aiBrain.status")}</strong><small>{activeBrain === "none" ? t("settings.aiBrain.chooseProvider") : activeBrain === "codex" ? codexHealth?.reason ?? (codexHealth?.ready ? t("settings.aiBrain.brainReadyDescription") : t("settings.aiBrain.notChecked")) : activeHostHealth?.error ?? (activeHostHealth?.ready ? t("settings.aiBrain.brainReadyDescription") : t("settings.aiBrain.checkCardBelow"))}</small></div><span className={(activeBrain === "codex" ? codexHealth?.ready : activeHostHealth?.ready) ? "pill pill-green" : "pill pill-orange"}>{(activeBrain === "codex" ? codexHealth?.ready : activeHostHealth?.ready) ? t("settings.aiBrain.ready") : t("settings.aiBrain.needsAttention")}</span></div>
+      <div className="settings-row settings-select-row">
+        <div className="settings-row-info"><strong>{t("settings.aiBrain.activeSelector")}</strong><small>{activeBrainReason}</small></div>
+        <div className="settings-row-controls">
+          <select className="settings-select" value={activeBrain} disabled={busy || !companion || !settings} onChange={(event) => event.target.value === "codex" ? selectCodex() : selectProvider(event.target.value as HostAiProfileId)}>
+            <option value="none" disabled>{t("settings.aiBrain.chooseProvider")}</option>
+            <option value="codex">{t("settings.aiBrain.codex")}</option>
+            {providerIds.map((provider) => <option key={provider} value={provider}>{t(`settings.aiBrain.provider.${provider}`)}</option>)}
+          </select>
+          <span className={activeBrainReady ? "pill pill-green" : "pill pill-orange"}>{activeBrainReady ? t("settings.aiBrain.ready") : t("settings.aiBrain.needsAttention")}</span>
+        </div>
+      </div>
       <div className="settings-row"><div className="settings-row-info"><strong>{t("settings.aiBrain.visionSupport")}</strong><small>{activeImageHealth?.error ?? (activeImageHealth?.ready ? t("settings.aiBrain.visionSupportedDescription") : t("settings.aiBrain.visionDoesNotBlock"))}</small></div><div className="flex gap-2 items-center"><span className={activeImageHealth?.ready ? "pill pill-green" : activeImageHealth?.status === "unsupported" ? "pill pill-slate" : "pill pill-orange"}>{activeImageHealth?.ready ? t("settings.aiBrain.visionSupported") : activeImageHealth?.status === "unsupported" ? t("settings.aiBrain.visionNotSupported") : t("settings.aiBrain.visionNeedsAttention")}</span><Button variant="secondary" size="compact" disabled={busy} onClick={onOpenVision}>{t("settings.aiBrain.openPetVision")}</Button></div></div>
     </div>
 
@@ -2446,7 +2450,7 @@ function AbilityDiagnosticRow({ label, ready, detail, neutral = false }: { label
 }
 
 function VoiceSelectRow({ title, description, value, options, disabled, onChange }: { title: string; description: string; value: string; options: Array<{ value: string; label: string; disabled?: boolean }>; disabled: boolean; onChange: (value: string) => void }) {
-  return <div className="settings-row"><div className="settings-row-info"><strong>{title}</strong><small>{description}</small></div><select className="settings-select" value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)}>{options.map((option) => <option key={option.value} value={option.value} disabled={option.disabled}>{option.label}</option>)}</select></div>;
+  return <div className="settings-row settings-select-row"><div className="settings-row-info"><strong>{title}</strong><small>{description}</small></div><select className="settings-select" value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)}>{options.map((option) => <option key={option.value} value={option.value} disabled={option.disabled}>{option.label}</option>)}</select></div>;
 }
 
 function VoiceTextRow({ title, description, value, placeholder, type = "text", disabled, onSave }: { title: string; description: string; value: string; placeholder?: string; type?: string; disabled: boolean; onSave: (value: string) => void }) {

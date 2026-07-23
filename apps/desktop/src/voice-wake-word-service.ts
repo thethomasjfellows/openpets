@@ -521,6 +521,18 @@ export class VoiceWakeWordService {
       || this.#state.turnState === "collecting";
     if (!acceptsWakeAudio) return;
     this.#activation.ingest(frame);
+    if (
+      (this.#state.turnState === "follow-up" || this.#state.turnState === "activated")
+      && this.#activation.turnState === "collecting"
+    ) {
+      // Runtime VAD can miss speech-start even though the local energy gate has
+      // already accepted speech. Both timers guard only the no-speech window;
+      // once collection starts, endpointing and the bounded utterance cap own
+      // completion.
+      this.#clearActivationTimer();
+      this.#clearFollowUpTimer();
+      this.#state = { ...this.#state, turnState: "collecting" };
+    }
     try {
       this.#runtimeSession?.sendFrame(frame);
     } catch (error) {

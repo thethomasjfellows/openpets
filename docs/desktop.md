@@ -176,8 +176,10 @@ that lease ends. After spoken output and the Companion turn both complete, the
 default-on follow-up preference immediately reopens that listening state for
 five seconds without displaying a countdown; the completed response remains
 below its red **Listening** header during that window. Speech onset clears the
-short no-speech timer; conversational endpointing tolerates natural pauses and
-keeps the turn open for up to 30 seconds. Silence before speech clears the bubble and returns to
+short no-speech timer; local frame energy provides the same transition when the
+runtime misses its speech-start VAD event, so an accepted second turn cannot be
+cut off by the no-speech timer. Conversational endpointing tolerates natural
+pauses and keeps the turn open for up to 30 seconds. Silence before speech clears the bubble and returns to
 ordinary keyword detection. The bubble close control and the global **Control +
 backtick** shortcut cancel listening,
 transcription, provider generation, or speech without consuming Escape in the
@@ -303,9 +305,10 @@ and diagnosable:
   arguments and appends a diagnostic marker that is recorded by the replacement
   process at startup. Packaged macOS QA must confirm the process ID changes; a
   renderer-only or mocked relaunch check is not sufficient for this workflow.
-- **AI Brain** owns one global conversation target. A compact selector at the
-  top chooses Codex CLI or one direct provider. Separate cards below retain the
-  configuration for Codex, Anthropic, OpenAI, OpenRouter, Ollama, and a custom
+- **AI Brain** owns one global conversation target. A compact top row combines
+  the active-provider selector with that provider's ordinary conversation
+  readiness; it chooses Codex CLI or one direct provider. Separate cards below
+  retain the configuration for Codex, Anthropic, OpenAI, OpenRouter, Ollama, and a custom
   OpenAI-compatible endpoint at the same time; selecting a brain does not erase
   or hide the others. Each direct-provider card owns its model, endpoint where
   applicable, readiness check, and independently encrypted credential. A card
@@ -338,14 +341,17 @@ Electron adapter checks OS screen-capture permission and encodes a bounded
 1280×800 JPEG for each image input. `VisionAiRouter` sends each screenshot to the selected
 global AI Brain: Codex receives it through the official CLI image input, while
 the direct API target uses Anthropic, OpenAI, OpenRouter, Ollama, or a custom
-OpenAI-compatible image input. Both receive an instruction to produce
-high-level context without transcribing sensitive details. Health uses a
-synthetic magenta image and requires the model to identify its color, so a text-
+OpenAI-compatible image input. Both receive an instruction to produce a richer
+2–4 bullet summary of the app/window, likely activity, and distinct
+non-sensitive regions with rough positions, without quoting or transcribing
+visible text or exposing sensitive details. Health uses a synthetic magenta image and requires the model to identify its color, so a text-
 only model that ignores image input cannot report Vision-ready. Changing the
 AI target, model, reasoning effort, or key invalidates Vision health so an image
 that passed one provider's probe cannot be sent to an unprobed replacement. A summary is
-saved only after non-empty image summarization succeeds; neither screenshots,
-paths, nor summary text cross the renderer IPC boundary.
+  saved only after non-empty image summarization succeeds; neither screenshots,
+  paths, nor summary text cross the renderer IPC boundary. A multi-monitor cycle is
+  retained as one group; if any monitor fails to persist, the incomplete group is
+  rolled back so later conversations never inspect only part of that capture.
 
 Pet Vision may store an optional model override independently from the active
 conversation brain. The selector combines Codex image-capable models with
@@ -368,11 +374,25 @@ Disabling aborts work and deletes retained screenshots and summaries; the UI
 reports an error instead of claiming deletion if the store cannot confirm it.
 A failed index write likewise remains an error and does not advance the last
 retained-summary timestamp.
-Direct Companion turns receive summary text plus its non-sensitive monitor
-label, but never display IDs, bounds, image paths, or bytes. Both direct and proactive
-prompts label Vision summaries as untrusted quoted observations that can never
-supply instructions. Vision-driven proactive candidates still pass the same quiet-hours, activity, provider-health, daily
-cap, spacing, expiry, and dedupe policy as every other check-in. Every
+Ordinary Companion turns receive summary text plus its non-sensitive monitor
+label, but never display IDs, bounds, image paths, or bytes. When the user's
+message deterministically asks about the screen, screenshot, monitor, desktop,
+or a visibly referenced app/object, the orchestrator asks the active Companion
+AI Brain to inspect each image in the newest retained capture group. Those
+  per-monitor observations are bounded and included only in that turn's final
+  text prompt; raw image bytes and paths never enter renderer IPC, the text prompt,
+  or durable memory. Raw bytes are sent only after that exact target configuration
+  has already passed image-readiness verification. Disabling Vision changes its
+  access generation, aborting any remaining monitor inspections and the pending
+  answer. The orchestrator fingerprints the active target, provider,
+model, endpoint, credential, and Codex reasoning choice; a change before,
+during, or after inspection cancels the turn before another monitor or final
+response can use mixed provider state. Inspection failure falls back to retained
+summaries instead of breaking the conversation. Proactive turns remain summary-only. Direct and
+proactive prompts label all Vision context as untrusted observations that can
+never supply instructions. Vision-driven proactive candidates still pass the
+same quiet-hours, activity, provider-health, daily cap, spacing, expiry, and
+dedupe policy as every other check-in. Every
 proactive result revalidates that the same default pet is still visible and
 unpaused immediately before display. Vision candidates additionally revalidate
 their source opportunity, so pausing, disabling, or expiring Vision during

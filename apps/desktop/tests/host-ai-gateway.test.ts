@@ -69,6 +69,14 @@ assert.equal(beforeProbe.status, "configured-unverified");
 assert.equal(beforeProbe.configured, true);
 assert.equal(beforeProbe.ready, false);
 assert.equal(beforeProbe.baseUrl, "https://api.openai.com/v1");
+const initialConfigurationKey = await healthGateway.getConfigurationKey();
+updateHostAiSettings({ provider: "openai", model: "gpt-other" });
+assert.notEqual(await healthGateway.getConfigurationKey(), initialConfigurationKey, "model changes invalidate an in-flight provider route");
+updateHostAiSettings({ provider: "openai", model: "gpt-test" });
+secret = "rotated-test-key";
+assert.notEqual(await healthGateway.getConfigurationKey(), initialConfigurationKey, "credential changes invalidate an in-flight provider route without exposing the secret");
+secret = "test-key";
+assert.equal(await healthGateway.getConfigurationKey(), initialConfigurationKey);
 
 const ready = await healthGateway.probeHealth();
 assert.equal(ready.status, "ready");

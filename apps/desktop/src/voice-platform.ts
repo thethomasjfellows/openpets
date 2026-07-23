@@ -24,7 +24,7 @@ import { VoiceTranscriptionRouter } from "./voice-transcription-router.js";
 import { VoiceWakeCalibrationService } from "./voice-wake-calibration-service.js";
 import { createProductionOfficialVoiceWakeRuntime } from "./voice-wake-official-runtime.js";
 import { VoiceWakeWordService } from "./voice-wake-word-service.js";
-import { getVisionContextSummaries, getVisionProactiveOpportunities } from "./vision-service.js";
+import { getVisionContextSummaries, getVisionInspectionAccessKey, getVisionInspectionScreens, getVisionProactiveOpportunities } from "./vision-service.js";
 import { acquireDefaultPetConversationPresentation } from "./pet-presentation-ownership.js";
 
 type VoicePlatform = {
@@ -65,7 +65,12 @@ export function initializeVoicePlatform(capabilities: ElectronPluginHostCapabili
       command: getPreferredCodexCommand(),
       getModel: () => getCodexAiBrain().resolveSelectedExecutableModel(),
       getReasoningEffort: () => getCompanionSettings().codex.reasoningEffort,
-    })), new HostAiCompanionTarget(capabilities.aiGateway)],
+    }), undefined, async (request) => getCodexAiBrain().summarizeImage({
+      image: request.image,
+      mimeType: request.mimeType,
+      prompt: request.prompt,
+      maxTokens: 260,
+    }, { signal: request.signal }), undefined, async () => (await getCodexAiBrain().getImageSummaryHealthSnapshot()).ready), new HostAiCompanionTarget(capabilities.aiGateway)],
     output,
     getAppState: getAppStateSnapshot,
     showBubble: showInstalledPetHostBubble,
@@ -75,6 +80,8 @@ export function initializeVoicePlatform(capabilities: ElectronPluginHostCapabili
       else info("companion", message, fields);
     },
     getVisionSummaries: getVisionContextSummaries,
+    getVisionInspectionScreens,
+    getVisionInspectionAccessKey,
     isProactiveTurnValid: ({ petId, proactive, now }) => {
       const appState = getAppStateSnapshot();
       if (appState.preferences.defaultPetId !== petId || !isDefaultPetVisible() || getDefaultPetPaused()) return false;

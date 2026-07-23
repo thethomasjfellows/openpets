@@ -168,6 +168,11 @@ export class HostAiGateway {
     this.#healthTtlMs = Math.max(0, options.healthTtlMs ?? defaultHealthTtlMs);
   }
 
+  /** Stable fingerprint for the active provider, model, endpoint, and secret. */
+  async getConfigurationKey(): Promise<string> {
+    return (await this.#resolveHealthContext()).cacheKey;
+  }
+
   /** Compatibility readiness: configured enough to attempt, without a probe. */
   async available(): Promise<boolean> {
     return (await this.#resolveHealthContext()).configured;
