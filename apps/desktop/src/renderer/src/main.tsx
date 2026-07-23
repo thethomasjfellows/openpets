@@ -4,6 +4,7 @@ import { I18nProvider, useI18n, type I18nSnapshot } from "./i18n";
 import "./styles.css";
 import openPetsLogoUrl from "../../../assets/openpets.webp";
 import defaultThumbUrl from "../../../assets/default-pet-thumbnail.png";
+import { getPetVisionStatus } from "../vision-status.js";
 
 import claudeLogoUrl from "../../../assets/integrations/claude.svg";
 import codexLogoUrl from "../../../assets/integrations/codex.png";
@@ -2097,10 +2098,20 @@ function AbilitiesSettingsPanel({ section, settings, secrets, busy, onSettings, 
     setMessage(t("settings.permissions.opened"));
   });
   const setVisionEnabled = (enabled: boolean) => void run(t("settings.busy.saving"), async () => {
-    const next = await api.setVisionEnabled(enabled);
+    let next = await api.setVisionEnabled(enabled);
+    if (enabled && next.capture.status === "permission-denied") {
+      const nextPermissions = await api.requestDesktopPermission("screen-recording");
+      setPermissions(nextPermissions);
+      if (nextPermissions.appLocation === "applications" && nextPermissions.permissions["screen-recording"].requiresRestartAfterGrant) {
+        setPermissionRestartSuggested((current) => ({ ...current, "screen-recording": true }));
+      }
+      next = await api.getVisionSnapshot(true);
+    }
     setVision(next);
     setMessage(enabled
-      ? t("settings.abilities.vision.enabledSaved")
+      ? next.capture.ready
+        ? t("settings.abilities.vision.enabledSaved")
+        : t("settings.permissions.screenRequested")
       : next.storage.deleteError || !next.storage.persisted
         ? t("settings.abilities.vision.deleteFailed")
         : t("settings.abilities.vision.disabledDeleted"));
@@ -2125,9 +2136,7 @@ function AbilitiesSettingsPanel({ section, settings, secrets, busy, onSettings, 
     const [next, nextPermissions] = await Promise.all([api.getVisionSnapshot(true), api.getDesktopPermissions()]);
     setVision(next);
     setPermissions(nextPermissions);
-    if (!next.capture.ready || !next.summary.ready) {
-      throw new Error(next.capture.reason ?? next.summary.reason ?? t("settings.abilities.vision.status.blocked"));
-    }
+    if (!next.capture.ready || !next.summary.ready) return;
     setMessage(t("settings.abilities.vision.checkReady"));
   });
   const saveProvider = (id: VoiceProviderId, patch: Record<string, unknown>) => settings && save({ providers: { [id]: { ...settings.providers[id], ...patch } } });
@@ -2203,17 +2212,21 @@ function AbilitiesSettingsPanel({ section, settings, secrets, busy, onSettings, 
   const availablePets = settings.installedPets.filter((pet) => pet.available);
   const selectedPetId = availablePets[0]?.id || "";
   const orderedProviderIds = [settings.output.providerId, ...providerIds.filter((id) => id !== settings.output.providerId)];
-  const visionWorking = Boolean(
-    vision?.enabled
-    && vision.capture.ready
-    && vision.summary.ready
-    && (vision.state === "ready" || vision.state === "capturing" || vision.state === "summarizing"),
-  );
-  const compactVisionStatus = !vision?.enabled
-    ? t("settings.abilities.vision.status.off")
-    : visionWorking
-      ? t("settings.abilities.vision.working")
-      : t("settings.abilities.vision.status.blocked");
+  const visionStatus = getPetVisionStatus({
+    enabled: vision?.enabled ?? false,
+    state: vision?.state ?? "disabled",
+    captureReady: vision?.capture.ready ?? false,
+    summaryReady: vision?.summary.ready ?? false,
+  });
+  const visionWorking = visionStatus === "working";
+  const visionPaused = visionStatus === "paused";
+  const compactVisionStatus = t(visionStatus === "off"
+    ? "settings.abilities.vision.status.off"
+    : visionStatus === "paused"
+      ? "settings.abilities.vision.status.pausedShort"
+      : visionStatus === "working"
+        ? "settings.abilities.vision.working"
+        : "settings.abilities.vision.status.setupNeeded");
   const activeVisionPreference = companionSettings?.target === "codex"
     ? vision?.modelPreference?.owner === "codex" ? vision.modelPreference.model : ""
     : vision?.modelPreference?.owner === "host-ai" && vision.modelPreference.provider === visionBrainSettings?.provider
@@ -2401,7 +2414,7 @@ function AbilitiesSettingsPanel({ section, settings, secrets, busy, onSettings, 
 
     {section === "vision" && <div className="settings-group">
       <ToggleRow title={t("settings.abilities.vision.toggle")} description={t("settings.abilities.vision.toggleDescription")} checked={vision?.enabled ?? false} disabled={busy || !vision} onChange={setVisionEnabled} />
-      <div className="settings-row"><div className="settings-row-info"><strong>{compactVisionStatus}</strong><small>{vision?.capture.reason ?? vision?.summary.reason ?? (visionWorking ? t("settings.abilities.vision.checkReady") : t("settings.abilities.vision.offDescription"))}</small></div><div className="flex gap-2 items-center"><span className={visionWorking ? "pill pill-green" : vision?.enabled ? "pill pill-orange" : "pill pill-slate"}>{compactVisionStatus}</span>{vision?.capture.status === "permission-denied" && screenPermission?.canOpenSettings && <Button variant="primary" size="compact" disabled={busy} onClick={() => openPermissionSettings("screen-recording")}>{t("settings.permissions.openSettings")}</Button>}<Button variant="secondary" size="compact" disabled={busy} onClick={checkVision}>{t("settings.abilities.vision.checkVision")}</Button>{vision?.capture.status === "permission-denied" && offerScreenRestart && <Button variant="secondary" size="compact" disabled={busy} onClick={() => void api.restartForDesktopPermissions()}>{t("settings.permissions.restart")}</Button>}</div></div>
+      <div className="settings-row"><div className="settings-row-info"><strong>{t("settings.abilities.vision.statusLabel")}</strong><small>{vision?.capture.reason ?? vision?.summary.reason ?? (visionWorking ? t("settings.abilities.vision.checkReady") : visionPaused ? t("settings.abilities.vision.pauseDescription") : t("settings.abilities.vision.offDescription"))}</small></div><div className="flex gap-2 items-center"><span className={visionWorking ? "pill pill-green" : vision?.enabled && !visionPaused ? "pill pill-orange" : "pill pill-slate"}>{compactVisionStatus}</span>{vision?.capture.status === "permission-denied" && screenPermission?.canRequest && <Button variant="primary" size="compact" disabled={busy} onClick={() => requestPermission("screen-recording")}>{t("settings.permissions.allowScreenAccess")}</Button>}<Button variant="secondary" size="compact" disabled={busy} onClick={checkVision}>{t("settings.abilities.vision.checkVision")}</Button>{vision?.capture.status === "permission-denied" && offerScreenRestart && <Button variant="secondary" size="compact" disabled={busy} onClick={() => void api.restartForDesktopPermissions()}>{t("settings.permissions.restart")}</Button>}</div></div>
       <VoiceSelectRow title={t("settings.abilities.vision.model")} description={t("settings.abilities.vision.modelDescription")} value={activeVisionPreference} disabled={busy || !companionSettings || visionBrainSettings?.provider === "none" && companionSettings.target === "host-ai"} onChange={saveVisionModel} options={visionModelOptions} />
       <div className="settings-row"><div className="settings-row-info"><strong>{t("settings.abilities.vision.storage")}</strong><small>{t("settings.abilities.vision.privacy")}</small></div><Button variant="secondary" size="compact" disabled={busy || !vision} onClick={openVisionStorage}>{t("settings.abilities.vision.openStorage")}</Button></div>
     </div>}

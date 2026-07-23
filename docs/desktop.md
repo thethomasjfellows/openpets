@@ -280,7 +280,7 @@ and diagnosable:
   exercise PocketTTS or a fallback provider. Spoken Companion turns suppress
   the matching bubble's ordinary auto-narration so one answer has one TTS owner.
 - **Vision** is a separate default-off capability presented as a concise
-  **PetVision** switch, one Working/Needs Attention status row, an optional
+  **Pet Vision** switch, one live Working/Setup needed status row, an optional
   model override scoped to the active AI Brain provider, and an **Open Storage
   Folder** action. **Check Vision** always performs a non-capturing
   screen/provider readiness probe, including while Vision is off or paused.
@@ -321,7 +321,7 @@ and diagnosable:
   conversation plus a separate, non-blocking Vision Supported/Not
   Supported/Needs Attention result. Checking a provider evaluates both paths,
   but a Vision limitation never disables a working conversational brain. The
-  Vision result links directly to PetVision settings.
+  Vision result links directly to Pet Vision settings.
 
 Vision is host-owned rather than a plugin. `vision-service.ts` captures the
 screen containing the visible, unpaused default pet after a 30-second enable
@@ -343,7 +343,7 @@ that passed one provider's probe cannot be sent to an unprobed replacement. A su
 saved only after non-empty image summarization succeeds; neither screenshots,
 paths, nor summary text cross the renderer IPC boundary.
 
-PetVision may store a model override for its active AI Brain, but never a
+Pet Vision may store a model override for its active AI Brain, but never a
 different provider or target. Selecting Codex limits the override to a Codex
 image-capable model; selecting a direct provider limits it to that provider's
 catalog and existing credentials. A saved override from another provider is

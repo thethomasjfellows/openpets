@@ -467,12 +467,12 @@ export function installInternalUiHandlers(): void {
       if (!isPlainObject(value) || typeof value.model !== "string" || !value.model.trim()) throw new Error("Choose a valid Vision model.");
       const model = value.model.trim().slice(0, 160);
       if (companion.target === "codex") {
-        if (value.owner !== "codex") throw new Error("PetVision can only override the active AI Brain.");
+        if (value.owner !== "codex") throw new Error("Pet Vision can only override the active AI Brain.");
         setVisionModelPreference({ owner: "codex", model });
       } else {
         const provider = getHostAiSettings().provider;
         if (provider === "none" || value.owner !== "host-ai" || value.provider !== provider) {
-          throw new Error("PetVision can only override the active AI provider.");
+          throw new Error("Pet Vision can only override the active AI provider.");
         }
         setVisionModelPreference({ owner: "host-ai", provider, model });
       }
