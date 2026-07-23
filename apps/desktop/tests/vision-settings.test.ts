@@ -10,6 +10,7 @@ import {
   pauseVisionFor,
   resumeVision,
   setVisionEnabled,
+  setVisionModelPreference,
   visionSettingsFileName,
 } from "../src/vision-settings.js";
 
@@ -22,6 +23,8 @@ try {
 
   const enabled = setVisionEnabled(true, now);
   assert.equal(enabled.enabled, true);
+  const preferred = setVisionModelPreference({ owner: "codex", model: "gpt-vision" }, now);
+  assert.deepEqual(preferred.modelPreference, { owner: "codex", model: "gpt-vision" });
   const paused = pauseVisionFor(30, now);
   assert.equal(paused.pausedUntil, now + 30 * 60 * 1_000);
   assert.equal(isVisionPaused(paused, now), true);
@@ -32,10 +35,14 @@ try {
 
   pauseVisionFor(90, now);
   const disabled = setVisionEnabled(false, now);
-  assert.deepEqual(disabled, { version: 1, enabled: false }, "disabling clears pause state");
+  assert.deepEqual(disabled, {
+    version: 1,
+    enabled: false,
+    modelPreference: { owner: "codex", model: "gpt-vision" },
+  }, "disabling clears pause state but preserves the non-sensitive model preference");
 
   const persisted = JSON.parse(readFileSync(join(root, visionSettingsFileName), "utf8"));
-  assert.deepEqual(persisted, { version: 1, enabled: false });
+  assert.deepEqual(persisted, disabled);
 
   writeFileSync(join(root, visionSettingsFileName), JSON.stringify({
     version: 1,
@@ -53,6 +60,17 @@ try {
   }));
   assert.deepEqual(initializeVisionSettings(root, now), { version: 1, enabled: false }, "stale screen fields never grant consent");
   assert.deepEqual(getVisionSettings(now), { version: 1, enabled: false });
+
+  writeFileSync(join(root, visionSettingsFileName), JSON.stringify({
+    version: 1,
+    enabled: true,
+    modelPreference: { owner: "host-ai", provider: "not-a-provider", model: "secret-model" },
+  }));
+  assert.deepEqual(
+    initializeVisionSettings(root, now),
+    { version: 1, enabled: true },
+    "invalid model preferences are ignored instead of changing the active AI provider",
+  );
 
   console.log("Vision settings behavior verified");
 } finally {

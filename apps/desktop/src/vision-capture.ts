@@ -41,21 +41,12 @@ export function createElectronVisionCapture(options: ElectronVisionCaptureOption
       const hasUsableThumbnail = sources.some((source) => !source.thumbnail.isEmpty());
       cachedHealth = hasUsableThumbnail
         ? { ready: true, status: "ready", checkedAt: now() }
-        : (access === "denied" || access === "restricted")
-          ? {
-              ready: false,
-              status: "permission-denied",
-              checkedAt: now(),
-              reason: "Allow Screen & System Audio Recording for OpenPets in System Settings.",
-            }
         : {
             ready: false,
             status: "unavailable",
             checkedAt: now(),
             reason: sources.length > 0
-              ? access === "granted"
-                ? "Screen access is granted, but capture is not ready yet. Restart OpenPets and check again."
-                : "OpenPets can see a display but cannot capture it yet. Check Screen & System Audio Recording."
+              ? "OpenPets can see a display but cannot capture it yet. Restart OpenPets and check again."
               : "No screen is currently available to OpenPets.",
           };
       return cachedHealth;

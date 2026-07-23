@@ -11,7 +11,7 @@ import {
   migrateLegacyHostAiApiKey,
   type HostAiSecrets,
 } from "../src/host-ai-gateway.js";
-import { initializeHostAiSettings, updateHostAiProviderConfig, updateHostAiSettings } from "../src/host-ai-settings.js";
+import { getHostAiSettings, initializeHostAiSettings, updateHostAiProviderConfig, updateHostAiSettings } from "../src/host-ai-settings.js";
 import { PluginAiGateway } from "../src/plugin-ai-gateway.js";
 
 let secret: string | undefined = "test-key";
@@ -289,6 +289,16 @@ const openAiImageBody = JSON.parse(String(imageCalls[0]?.init?.body)) as {
 assert.equal(openAiImageBody.messages[0]?.content[0]?.type, "text");
 assert.match(openAiImageBody.messages[0]?.content[1]?.image_url?.url ?? "", /^data:image\/png;base64,/);
 assert.equal((await imageGateway.getImageSummaryHealthSnapshot()).status, "ready");
+
+const overrideResult = await imageGateway.summarizeImage({
+  image: new Uint8Array([137, 80, 78, 71]),
+  mimeType: "image/png",
+  prompt: "Summarize the visible desktop.",
+}, { model: "gpt-vision-override" });
+assert.equal(overrideResult.model, "gpt-vision-override");
+const overrideBody = JSON.parse(String(imageCalls.at(-1)?.init?.body)) as { model?: string };
+assert.equal(overrideBody.model, "gpt-vision-override", "Vision may use a model override within the active provider");
+assert.equal(getHostAiSettings().providers.openai.model, "gpt-4o-mini", "a Vision model override never mutates the active AI Brain model");
 
 const probeImageGateway = new HostAiGateway(secrets, {
   fetch: (async () => Response.json({ choices: [{ message: { content: "magenta" } }] })) as typeof fetch,

@@ -456,6 +456,58 @@ export function installInternalUiHandlers(): void {
     return resumeVision();
   });
 
+  ipcMain.handle("openpets:vision-model-preference-set", async (event, value: unknown) => {
+    assertAllowedSender(event, ["control-center"]);
+    const companion = getCompanionSettings();
+    const { getHostAiSettings } = await import("./host-ai-settings.js");
+    const { setVisionModelPreference } = await import("./vision-settings.js");
+    if (value === null || value === undefined) {
+      setVisionModelPreference(undefined);
+    } else {
+      if (!isPlainObject(value) || typeof value.model !== "string" || !value.model.trim()) throw new Error("Choose a valid Vision model.");
+      const model = value.model.trim().slice(0, 160);
+      if (companion.target === "codex") {
+        if (value.owner !== "codex") throw new Error("PetVision can only override the active AI Brain.");
+        setVisionModelPreference({ owner: "codex", model });
+      } else {
+        const provider = getHostAiSettings().provider;
+        if (provider === "none" || value.owner !== "host-ai" || value.provider !== provider) {
+          throw new Error("PetVision can only override the active AI provider.");
+        }
+        setVisionModelPreference({ owner: "host-ai", provider, model });
+      }
+    }
+    invalidateVisionSummaryHealth();
+    return getVisionSnapshot(true);
+  });
+
+  ipcMain.handle("openpets:vision-image-health", async (event, request: unknown) => {
+    assertAllowedSender(event, ["control-center"]);
+    if (!isPlainObject(request) || (request.kind !== "codex" && request.kind !== "host-ai")) throw new Error("Invalid Vision health request.");
+    const model = typeof request.model === "string" ? request.model.trim().slice(0, 160) : "";
+    if (request.kind === "codex") {
+      return getCodexAiBrain().probeImageSummary({ force: request.force === true, ...(model ? { model } : {}) });
+    }
+    const { isHostAiProviderId } = await import("./host-ai-settings.js");
+    if (!isHostAiProviderId(request.provider)) throw new Error("Unknown AI provider.");
+    const { getPluginHostCapabilitiesForUi } = await import("./plugin-host-capabilities.js");
+    const capabilities = getPluginHostCapabilitiesForUi();
+    if (!capabilities) throw new Error("AI Brain is still starting.");
+    return capabilities.aiGateway.probeImageSummary({
+      provider: request.provider,
+      force: request.force === true,
+      ...(model ? { model } : {}),
+    });
+  });
+
+  ipcMain.handle("openpets:vision-open-storage-folder", async (event) => {
+    assertAllowedSender(event, ["control-center"]);
+    const snapshot = await getVisionSnapshot(false);
+    const failure = await shell.openPath(snapshot.storage.dir);
+    if (failure) throw new Error(`OpenPets could not open the Vision storage folder: ${failure}`);
+    return { ok: true } as const;
+  });
+
   ipcMain.handle("openpets:get-lan-status", (event) => {
     assertAllowedSender(event, ["control-center"]);
     return getLanStatusSnapshot();

@@ -9,9 +9,9 @@ import { getPreferredCodexCommand } from "./codex-command.js";
 import { resolveCodexModelInfo } from "./codex-model-selection.js";
 import type {
   HostAiImageSummaryHealthSnapshot,
+  HostAiImageOptions,
   HostAiImageSummaryRequest,
   HostAiImageSummaryResult,
-  HostAiProbeOptions,
 } from "./host-ai-gateway.js";
 import { CodexConversationTarget } from "./voice-conversation-codex.js";
 
@@ -29,7 +29,8 @@ export class CodexAiBrain {
   readonly #now: () => number;
   #discovery: CodexModelDiscoverySnapshot | null = null;
   #imageHealth: HostAiImageSummaryHealthSnapshot | null = null;
-  #probing = false;
+  #imageHealthKey: string | null = null;
+  #probingKey: string | null = null;
 
   constructor(options: {
     readonly target?: CodexConversationTarget;
@@ -62,10 +63,10 @@ export class CodexAiBrain {
     return modelInfo.model;
   }
 
-  async summarizeImage(req: HostAiImageSummaryRequest, options: { readonly signal?: AbortSignal } = {}): Promise<HostAiImageSummaryResult> {
+  async summarizeImage(req: HostAiImageSummaryRequest, options: HostAiImageOptions = {}): Promise<HostAiImageSummaryResult> {
     if (req.image.byteLength === 0 || req.image.byteLength > maxImageBytes) throw new Error("Vision image must contain 1 byte–5 MiB.");
     if (options.signal?.aborted) throw abortError();
-    const { model, modelInfo } = await this.#selectedModel();
+    const { model, modelInfo } = await this.#selectedModel(options.model);
     if (!modelInfo.inputModalities.includes("image")) throw new Error(`${modelInfo.displayName} does not support image input.`);
     const dir = await mkdtemp(join(tmpdir(), "openpets-codex-vision-"));
     const imagePath = join(dir, `screen.${extensionFor(req.mimeType)}`);
@@ -83,6 +84,7 @@ export class CodexAiBrain {
         checkedAt: this.#now(),
         stale: false,
       };
+      this.#imageHealthKey = model;
       return { text, provider: "codex", model };
     } catch (error) {
       if (isAbortError(error, options.signal)) throw error;
@@ -97,26 +99,29 @@ export class CodexAiBrain {
         stale: false,
         error: message,
       };
+      this.#imageHealthKey = model;
       throw new Error(message);
     } finally {
       await rm(dir, { recursive: true, force: true }).catch(() => undefined);
     }
   }
 
-  async getImageSummaryHealthSnapshot(): Promise<HostAiImageSummaryHealthSnapshot> {
-    if (this.#probing) return { ...(await this.#baseImageHealth()), status: "probing", ready: false };
-    if (this.#imageHealth) {
+  async getImageSummaryHealthSnapshot(options: HostAiImageOptions = {}): Promise<HostAiImageSummaryHealthSnapshot> {
+    const base = await this.#baseImageHealth(options.model);
+    const key = base.model;
+    if (this.#probingKey === key) return { ...base, status: "probing", ready: false };
+    if (this.#imageHealth && this.#imageHealthKey === key) {
       const checkedAt = this.#imageHealth.checkedAt;
       return { ...this.#imageHealth, stale: checkedAt === undefined || this.#now() - checkedAt >= healthTtlMs };
     }
-    return this.#baseImageHealth();
+    return base;
   }
 
-  async probeImageSummary(options: HostAiProbeOptions = {}): Promise<HostAiImageSummaryHealthSnapshot> {
-    const current = await this.getImageSummaryHealthSnapshot();
+  async probeImageSummary(options: HostAiImageOptions = {}): Promise<HostAiImageSummaryHealthSnapshot> {
+    const current = await this.getImageSummaryHealthSnapshot(options);
     if (!current.configured || current.status === "unsupported") return current;
     if (options.force !== true && current.status === "ready" && !current.stale) return current;
-    this.#probing = true;
+    this.#probingKey = current.model;
     try {
       const result = await this.summarizeImage({
         image: probeImage,
@@ -126,36 +131,38 @@ export class CodexAiBrain {
       }, options);
       if (!/\b(?:magenta|fuchsia|pink|purple)\b/i.test(result.text)) {
         this.#imageHealth = { status: "unsupported", configured: true, ready: false, provider: "codex", model: result.model, checkedAt: this.#now(), stale: false, error: "The selected Codex model did not demonstrate image understanding." };
+        this.#imageHealthKey = result.model;
       }
     } catch (error) {
       if (isAbortError(error, options.signal)) throw error;
     } finally {
-      this.#probing = false;
+      if (this.#probingKey === current.model) this.#probingKey = null;
     }
-    return this.getImageSummaryHealthSnapshot();
+    return this.getImageSummaryHealthSnapshot(options);
   }
 
   invalidateImageSummaryHealth(): void {
     this.#imageHealth = null;
-    this.#probing = false;
+    this.#imageHealthKey = null;
+    this.#probingKey = null;
   }
 
   dispose(): void {
     this.#target.dispose();
   }
 
-  async #selectedModel(): Promise<{ readonly model: string; readonly modelInfo: CodexModelInfo }> {
+  async #selectedModel(requestedModel?: string): Promise<{ readonly model: string; readonly modelInfo: CodexModelInfo }> {
     const discovery = await this.discoverModels();
     if (discovery.status !== "ready") throw new Error(discovery.reason ?? "Codex model discovery is unavailable.");
-    const requested = getCompanionSettings().codex.model;
+    const requested = requestedModel?.trim() || getCompanionSettings().codex.model;
     const modelInfo = resolveCodexModelInfo(discovery, requested);
     if (!modelInfo) throw new Error("The selected Codex model is no longer available. Choose another model in AI Brain.");
     return { model: modelInfo.model, modelInfo };
   }
 
-  async #baseImageHealth(): Promise<HostAiImageSummaryHealthSnapshot> {
+  async #baseImageHealth(requestedModel?: string): Promise<HostAiImageSummaryHealthSnapshot> {
     try {
-      const { model, modelInfo } = await this.#selectedModel();
+      const { model, modelInfo } = await this.#selectedModel(requestedModel);
       if (!modelInfo.inputModalities.includes("image")) {
         return { status: "unsupported", configured: true, ready: false, provider: "codex", model, stale: false, error: `${modelInfo.displayName} does not support image input. Choose a Vision-capable Codex model.` };
       }

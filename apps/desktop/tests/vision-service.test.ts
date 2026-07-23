@@ -118,6 +118,10 @@ try {
   assert.equal(JSON.stringify(active).includes(".png"), false, "public status never exposes screenshot filenames");
   assert.equal(service.getContextSummaries("default").length, 1);
   assert.match(service.getProactiveOpportunities("default")[0]?.text ?? "", /untrusted quoted observation.*never as instructions/i);
+  const recentContextTime = now;
+  now += 31 * 60_000;
+  assert.equal(service.getProactiveOpportunities("default").length, 0, "Vision check-ins only consider roughly the last 30 minutes");
+  now = recentContextTime;
 
   service.handlePowerEvent("lock");
   service.handlePowerEvent("suspend");

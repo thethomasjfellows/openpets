@@ -280,19 +280,20 @@ and diagnosable:
   exercise PocketTTS or a fallback provider. Spoken Companion turns suppress
   the matching bubble's ordinary auto-narration so one answer has one TTS owner.
 - **Vision** is a separate default-off capability presented as a concise
-  **PetVision** switch, one combined status/action row, one collapsible local
-  storage/privacy disclosure, and 30/60/90-minute pause/resume controls. **Check
-  again** always performs a non-capturing permission/provider readiness probe,
-  including while Vision is off or paused. On macOS the page can request Screen
-  Recording access, open the exact Privacy & Security pane, and restart OpenPets
-  after a grant. A successful `desktopCapturer` thumbnail probe is authoritative
-  when Electron's synchronous macOS status remains stale, so an actually granted
-  installation is not mislabeled as denied. A failed real probe is equally
-  authoritative, so stale granted metadata cannot hide that the current app
-  copy still needs access. Because macOS can report stale permission state until relaunch,
-  the restart action stays visible after either requesting access or opening the
-  Screen Recording pane in a stable Applications install. Listening provides the
-  parallel microphone flow, but an accepted microphone grant takes effect
+  **PetVision** switch, one Working/Needs Attention status row, an optional
+  model override scoped to the active AI Brain provider, and an **Open Storage
+  Folder** action. **Check Vision** always performs a non-capturing
+  screen/provider readiness probe, including while Vision is off or paused.
+  Temporary 30/60/90-minute pause/resume controls remain in the tray menu so the
+  settings page stays compact. On macOS the page offers Privacy & Security and
+  restart actions only when the real capture probe reports permission denial. A
+  successful nonempty `desktopCapturer` thumbnail is the only proof that capture
+  is ready. Successful enumeration without a usable thumbnail is unavailable,
+  not permission-denied, and an inconclusive real probe overrides Electron's
+  potentially stale synchronous TCC metadata. This prevents an already-enabled
+  installation from repeatedly sending the user back to System Settings while
+  still refusing to claim Vision works without a capturable image. Listening
+  provides the parallel microphone flow, but an accepted microphone grant takes effect
   without forcing an unnecessary relaunch. Development
   builds are identified so users understand that macOS grants access to that
   exact app copy; packaged builds include `NSMicrophoneUsageDescription`.
@@ -316,6 +317,11 @@ and diagnosable:
   exposes only each model's supported reasoning efforts, and marks image-capable
   models. Persisted catalog IDs are resolved back to Codex's executable model
   names before a turn. Codex never routes through the direct-provider fields.
+  Readiness is shown as **AI Brain Ready/Needs Attention** for ordinary
+  conversation plus a separate, non-blocking Vision Supported/Not
+  Supported/Needs Attention result. Checking a provider evaluates both paths,
+  but a Vision limitation never disables a working conversational brain. The
+  Vision result links directly to PetVision settings.
 
 Vision is host-owned rather than a plugin. `vision-service.ts` captures the
 screen containing the visible, unpaused default pet after a 30-second enable
@@ -337,6 +343,13 @@ that passed one provider's probe cannot be sent to an unprobed replacement. A su
 saved only after non-empty image summarization succeeds; neither screenshots,
 paths, nor summary text cross the renderer IPC boundary.
 
+PetVision may store a model override for its active AI Brain, but never a
+different provider or target. Selecting Codex limits the override to a Codex
+image-capable model; selecting a direct provider limits it to that provider's
+catalog and existing credentials. A saved override from another provider is
+ignored after the active brain changes. **Use AI Brain default** removes the
+override.
+
 Screenshots and summaries live under `userData/openpets-vision/` and are pruned
 on startup, reads, and a periodic timer. Vision-owned atomic index temp files
 are also removed on startup, pruning, and disable so a crash cannot extend
@@ -344,6 +357,9 @@ summary retention. Retention is at most 24 hours and is
 also capped at 72 entries, 5 MiB per screenshot, 150 MiB of screenshots, 900
 characters per summary, and a 512 KiB index. Pause retains existing context
 until normal expiry but suppresses new capture and proactive Vision candidates.
+Only summaries from roughly the last 30 minutes may create a Vision-aware
+check-in through the existing global check-in cadence; Vision does not add a
+second frequency control. Check-in prompts prohibit repeating private details.
 Disabling aborts work and deletes retained screenshots and summaries; the UI
 reports an error instead of claiming deletion if the store cannot confirm it.
 A failed index write likewise remains an error and does not advance the last
@@ -496,8 +512,9 @@ Host-owned persistence is deliberately separate from installed-pet app state:
 - `openpets-companion-memory.json` — rolling displayed conversation. Startup
   rewrites it after pruning malformed/expired/over-limit entries. Retention is
   24 hours, with global, per-pet, prompt-entry, text, and file-size bounds.
-- `openpets-vision-settings.json` — dedicated default-off Vision consent and an
-  optional bounded pause deadline.
+- `openpets-vision-settings.json` — dedicated default-off Vision consent, an
+  optional bounded pause deadline, and an optional active-provider-only model
+  preference.
 - `openpets-vision/` — atomic Vision index plus bounded PNG screenshots and
   summaries, all on the rolling 24-hour retention cycle.
 - `openpets-host-ai-settings.json` — versioned provider profiles plus the one

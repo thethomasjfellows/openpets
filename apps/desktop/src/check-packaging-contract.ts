@@ -19,6 +19,7 @@ const builderConfigPath = join(appDir, "electron-builder.yml");
 const builderConfig = readFileSync(builderConfigPath, "utf8");
 const releaseScript = readFileSync(join(appDir, "scripts", "release-local.mjs"), "utf8");
 const packageRunner = readFileSync(join(appDir, "scripts", "run-electron-builder-current.mjs"), "utf8");
+const macLocalSignatureScript = readFileSync(join(appDir, "scripts", "stabilize-macos-local-signature.mjs"), "utf8");
 
 assert.equal(packageJson.description, "OpenPets tray-first desktop companion app.");
 assert.equal(packageJson.author, "OpenPets");
@@ -40,6 +41,8 @@ const injectedTarget = spawnSync(
 assert.notEqual(injectedTarget.status, 0, "ordinary packaging must reject cross-target arguments before electron-builder runs.");
 assert.match(`${injectedTarget.stderr ?? ""}${injectedTarget.stdout ?? ""}`, /Unknown packaging option/);
 assert.match(packageRunner, /process\.platform === "win32"[\s\S]*"cmd\.exe"[\s\S]*"pnpm\.cmd"/, "ordinary Windows packaging must invoke pnpm through its command shim.");
+assert.match(packageRunner, /process\.platform === "darwin"[\s\S]*stabilize-macos-local-signature\.mjs/, "ordinary macOS packaging must stabilize ad-hoc local app identity after electron-builder runs.");
+assert.match(macLocalSignatureScript, /Signature=adhoc[\s\S]*designated => identifier "dev\.openpets\.app"[\s\S]*--verify/, "local ad-hoc packages must use a stable designated requirement without replacing a real signing identity.");
 assert.match(
   releaseScript,
   /electron-builder[\s\S]*validatePackagedWakeTarget\(build\.wakeTarget\)/,

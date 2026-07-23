@@ -67,6 +67,17 @@ assert.equal(
   "a successful real capture probe overrides a stale macOS status value",
 );
 
+const inconclusiveProbeService = new DesktopPermissionService({
+  ...deps,
+  getMediaAccessStatus: (kind) => kind === "screen" ? "denied" : "granted",
+  probeScreenAccess: async () => "unknown",
+});
+assert.equal(
+  (await inconclusiveProbeService.refresh()).permissions["screen-recording"].status,
+  "unknown",
+  "an inconclusive real capture probe must not fall back to stale denied metadata",
+);
+
 const failedProbeOpened: string[] = [];
 const failedProbeService = new DesktopPermissionService({
   ...deps,

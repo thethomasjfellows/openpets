@@ -27,6 +27,7 @@ const behaviorTests = [
   ".test-dist/tests/host-ai-settings.test.js",
   ".test-dist/tests/host-ai-gateway.test.js",
   ".test-dist/tests/vision-settings.test.js",
+  ".test-dist/tests/vision-ai-router.test.js",
   ".test-dist/tests/vision-store.test.js",
   ".test-dist/tests/vision-service.test.js",
   ".test-dist/tests/companion-settings.test.js",

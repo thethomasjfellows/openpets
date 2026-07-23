@@ -1,5 +1,6 @@
 import type {
   HostAiImageSummaryHealthSnapshot,
+  HostAiImageOptions,
   HostAiImageSummaryRequest,
   HostAiImageSummaryResult,
 } from "./host-ai-gateway.js";
@@ -13,6 +14,7 @@ import {
   resumeVision as resumeVisionSettings,
   setVisionEnabled as persistVisionEnabled,
   type VisionPauseMinutes,
+  type VisionModelPreference,
   type VisionSettings,
 } from "./vision-settings.js";
 import { VisionStore, type VisionContextSummary, type VisionStoreSnapshot } from "./vision-store.js";
@@ -56,6 +58,7 @@ export type VisionSnapshot = {
     readonly checkedAt?: number;
     readonly reason?: string;
   };
+  readonly modelPreference?: VisionModelPreference;
   readonly lastCaptureAt?: number;
   readonly lastSummaryAt?: number;
   readonly nextCaptureAt?: number;
@@ -72,10 +75,10 @@ export type VisionProactiveOpportunity = {
 export type VisionAiGateway = {
   summarizeImage(
     req: HostAiImageSummaryRequest,
-    options?: { readonly signal?: AbortSignal },
+    options?: HostAiImageOptions,
   ): Promise<HostAiImageSummaryResult>;
-  getImageSummaryHealthSnapshot(): Promise<HostAiImageSummaryHealthSnapshot>;
-  probeImageSummary(options?: { readonly signal?: AbortSignal; readonly force?: boolean }): Promise<HostAiImageSummaryHealthSnapshot>;
+  getImageSummaryHealthSnapshot(options?: HostAiImageOptions): Promise<HostAiImageSummaryHealthSnapshot>;
+  probeImageSummary(options?: HostAiImageOptions): Promise<HostAiImageSummaryHealthSnapshot>;
   invalidateImageSummaryHealth(): void;
 };
 
@@ -101,7 +104,7 @@ const enabledCaptureDelayMs = 30_000;
 const regularCaptureIntervalMs = 20 * 60_000;
 const captureJitterMs = 5 * 60_000;
 const purgeIntervalMs = 10 * 60_000;
-const proactiveMaximumAgeMs = 45 * 60_000;
+const proactiveMaximumAgeMs = 30 * 60_000;
 const proactiveExpiryMs = 60 * 60_000;
 
 const visionSummaryPrompt = [
@@ -637,6 +640,7 @@ export class VisionService {
         ...(this.#summaryHealth.checkedAt === undefined ? {} : { checkedAt: this.#summaryHealth.checkedAt }),
         ...(this.#summaryHealth.error ? { reason: this.#summaryHealth.error } : {}),
       },
+      ...(settings.modelPreference ? { modelPreference: settings.modelPreference } : {}),
       ...(this.#lastCaptureAt === undefined ? {} : { lastCaptureAt: this.#lastCaptureAt }),
       ...(this.#lastSummaryAt === undefined ? {} : { lastSummaryAt: this.#lastSummaryAt }),
       ...(this.#nextCaptureAt === undefined ? {} : { nextCaptureAt: this.#nextCaptureAt }),

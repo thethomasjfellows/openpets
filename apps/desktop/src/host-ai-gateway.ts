@@ -111,6 +111,7 @@ export type HostAiGatewayOptions = {
 
 export type HostAiCallOptions = { readonly signal?: AbortSignal };
 export type HostAiProbeOptions = HostAiCallOptions & { readonly force?: boolean; readonly provider?: HostAiProfileId };
+export type HostAiImageOptions = HostAiProbeOptions & { readonly model?: string };
 export type HostAiModelOption = { readonly id: string; readonly name: string };
 export type HostAiModelCatalog = { readonly provider: HostAiProfileId; readonly models: readonly HostAiModelOption[] };
 
@@ -201,11 +202,11 @@ export class HostAiGateway {
 
   async summarizeImage(
     req: HostAiImageSummaryRequest,
-    options: HostAiCallOptions = {},
+    options: HostAiImageOptions = {},
   ): Promise<HostAiImageSummaryResult> {
     validateImageSummaryRequest(req);
     throwIfAborted(options.signal);
-    const context = await this.#resolveHealthContext();
+    const context = await this.#resolveHealthContext(options.provider, options.model);
     if (!context.configured || context.provider === "none" || !context.baseUrl) {
       throw new Error("Vision needs a configured AI provider and API key.");
     }
@@ -253,12 +254,12 @@ export class HostAiGateway {
     }
   }
 
-  async getImageSummaryHealthSnapshot(): Promise<HostAiImageSummaryHealthSnapshot> {
-    return this.#imageSnapshotForContext(await this.#resolveHealthContext());
+  async getImageSummaryHealthSnapshot(options: HostAiImageOptions = {}): Promise<HostAiImageSummaryHealthSnapshot> {
+    return this.#imageSnapshotForContext(await this.#resolveHealthContext(options.provider, options.model));
   }
 
-  async probeImageSummary(options: HostAiProbeOptions = {}): Promise<HostAiImageSummaryHealthSnapshot> {
-    const context = await this.#resolveHealthContext();
+  async probeImageSummary(options: HostAiImageOptions = {}): Promise<HostAiImageSummaryHealthSnapshot> {
+    const context = await this.#resolveHealthContext(options.provider, options.model);
     const current = this.#imageSnapshotForContext(context);
     if (!context.configured) return current;
     if (options.force !== true
@@ -408,7 +409,7 @@ export class HostAiGateway {
     };
   }
 
-  async #resolveHealthContext(requestedProvider?: HostAiProfileId): Promise<HealthContext> {
+  async #resolveHealthContext(requestedProvider?: HostAiProfileId, requestedModel?: string): Promise<HealthContext> {
     const settings = getHostAiSettings();
     const provider = requestedProvider ?? settings.provider;
     const config = provider === "none" ? undefined : settings.providers[provider];
@@ -418,7 +419,7 @@ export class HostAiGateway {
     const configured = provider !== "none"
       && Boolean(config?.model && config.baseUrl)
       && (config?.requiresApiKey !== true || Boolean(apiKey));
-    const model = provider === "none" ? "" : config?.model || defaultHostAiModels[provider];
+    const model = provider === "none" ? "" : requestedModel?.trim() || config?.model || defaultHostAiModels[provider];
     const baseUrl = provider === "none" ? undefined : effectiveBaseUrl(provider, config?.baseUrl);
     const keyFingerprint = apiKey ? createHash("sha256").update(apiKey).digest("hex") : "none";
     return {

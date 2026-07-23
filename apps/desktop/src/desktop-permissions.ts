@@ -98,9 +98,14 @@ export class DesktopPermissionService {
     if (this.#deps.platform === "darwin" && this.#deps.probeScreenAccess) {
       try {
         const result = await this.#deps.probeScreenAccess();
-        this.#screenProbeStatus = result === "granted" ? "granted" : result === "denied" ? "denied" : null;
+        // A real probe returning unknown is still authoritative evidence that
+        // the current executable could not prove capture access. Do not fall
+        // back to macOS's synchronous TCC metadata here: it is frequently
+        // stale after an app replacement and can turn an inconclusive probe
+        // into a false "denied" result.
+        this.#screenProbeStatus = result;
       } catch {
-        this.#screenProbeStatus = null;
+        this.#screenProbeStatus = "unknown";
       }
     }
     return this.snapshot();

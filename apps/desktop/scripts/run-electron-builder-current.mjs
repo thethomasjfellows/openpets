@@ -37,6 +37,9 @@ const builderArgs = [
   ...(rawArgs.includes("--dir") ? ["--dir"] : []),
 ];
 run("pnpm", builderArgs);
+if (process.platform === "darwin") {
+  run("node", ["scripts/stabilize-macos-local-signature.mjs"]);
+}
 if (rawArgs.includes("--validate-output")) {
   run("node", ["dist/check-packaging-contract.js", "--output"]);
 }
