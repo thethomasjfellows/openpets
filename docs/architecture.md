@@ -104,7 +104,7 @@ These are the flows worth holding in memory. Each links to the doc that details 
   without creating a spoken check-in. Fast wake detection runs in a native KWS/VAD
   helper behind a validated target manifest and bounded NDJSON protocol. Ambient
   audio stays local and in memory before activation. After a spoken answer, an
-  optional three-second follow-up window accepts one new utterance without the
+  optional five-second follow-up window accepts one new utterance without the
   wake phrase; silence returns the pet to ordinary wake detection.
 - **Installing a pet.** The app fetches catalog v3 (paginated, with a v2/fixture
   fallback), downloads the pet ZIP from `zip.openpets.dev`, validates and

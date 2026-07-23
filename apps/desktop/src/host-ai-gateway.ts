@@ -112,7 +112,11 @@ export type HostAiGatewayOptions = {
 export type HostAiCallOptions = { readonly signal?: AbortSignal };
 export type HostAiProbeOptions = HostAiCallOptions & { readonly force?: boolean; readonly provider?: HostAiProfileId };
 export type HostAiImageOptions = HostAiProbeOptions & { readonly model?: string };
-export type HostAiModelOption = { readonly id: string; readonly name: string };
+export type HostAiModelOption = {
+  readonly id: string;
+  readonly name: string;
+  readonly inputModalities?: readonly string[];
+};
 export type HostAiModelCatalog = { readonly provider: HostAiProfileId; readonly models: readonly HostAiModelOption[] };
 
 type ActiveProvider = Exclude<HostAiProviderKind, "none">;
@@ -368,7 +372,14 @@ export class HostAiGateway {
       signal: options.signal,
     });
     if (!response.ok) throw new Error(`Model catalog request failed with HTTP ${response.status}.`);
-    const parsed = await readBoundedJson<{ data?: Array<{ id?: unknown; name?: unknown; display_name?: unknown }> }>(response, "Model catalog", options.signal);
+    const parsed = await readBoundedJson<{
+      data?: Array<{
+        id?: unknown;
+        name?: unknown;
+        display_name?: unknown;
+        architecture?: { input_modalities?: unknown };
+      }>;
+    }>(response, "Model catalog", options.signal);
     const seen = new Set<string>();
     const models: HostAiModelOption[] = [];
     if (provider === "openrouter") {
@@ -381,7 +392,17 @@ export class HostAiGateway {
       const display = typeof candidate.name === "string" ? candidate.name.trim()
         : typeof candidate.display_name === "string" ? candidate.display_name.trim()
           : "";
-      models.push({ id, name: display || id });
+      const inputModalities = Array.isArray(candidate.architecture?.input_modalities)
+        ? candidate.architecture.input_modalities
+          .filter((value): value is string => typeof value === "string")
+          .map((value) => value.trim().toLowerCase())
+          .filter((value, index, values) => Boolean(value) && values.indexOf(value) === index)
+        : [];
+      models.push({
+        id,
+        name: display || id,
+        ...(inputModalities.length > 0 ? { inputModalities } : {}),
+      });
       seen.add(id);
       if (models.length >= 500) break;
     }

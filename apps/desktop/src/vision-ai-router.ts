@@ -15,15 +15,15 @@ export class VisionAiRouter implements VisionAiGateway {
 
   summarizeImage(...args: Parameters<VisionAiGateway["summarizeImage"]>) {
     const [request, options = {}] = args;
-    return this.#active().summarizeImage(request, { ...options, model: this.#modelPreference() });
+    return this.#active().summarizeImage(request, this.#options(options));
   }
 
   getImageSummaryHealthSnapshot() {
-    return this.#active().getImageSummaryHealthSnapshot({ model: this.#modelPreference() });
+    return this.#active().getImageSummaryHealthSnapshot(this.#options());
   }
 
   probeImageSummary(options: HostAiImageOptions = {}) {
-    return this.#active().probeImageSummary({ ...options, model: this.#modelPreference() });
+    return this.#active().probeImageSummary(this.#options(options));
   }
 
   invalidateImageSummaryHealth(): void {
@@ -32,15 +32,18 @@ export class VisionAiRouter implements VisionAiGateway {
   }
 
   #active(): VisionAiGateway {
+    const preference = getVisionSettings().modelPreference;
+    if (preference?.owner === "codex") return this.#codex;
+    if (preference?.owner === "host-ai") return this.#api;
     return getCompanionSettings().target === "codex" ? this.#codex : this.#api;
   }
 
-  #modelPreference(): string | undefined {
-    const companion = getCompanionSettings();
+  #options(options: HostAiImageOptions = {}): HostAiImageOptions {
     const preference = getVisionSettings().modelPreference;
-    if (!preference) return undefined;
-    if (companion.target === "codex") return preference.owner === "codex" ? preference.model : undefined;
+    if (preference?.owner === "codex") return { ...options, model: preference.model };
+    if (preference?.owner === "host-ai") return { ...options, provider: preference.provider, model: preference.model };
+    if (getCompanionSettings().target === "codex") return options;
     const provider = getHostAiSettings().provider;
-    return preference.owner === "host-ai" && preference.provider === provider ? preference.model : undefined;
+    return provider === "none" ? options : { ...options, provider };
   }
 }

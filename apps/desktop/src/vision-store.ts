@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { basename, join } from "node:path";
 
-import type { AiBrainProviderKind } from "./host-ai-settings.js";
+import { hostAiProviderIds, type AiBrainProviderKind } from "./host-ai-settings.js";
 import { assertSafeCompanionPetId } from "./companion-settings.js";
 
 export type VisionStoredEntry = {
@@ -21,7 +21,7 @@ export type VisionStoredEntry = {
   readonly expiresAt: number;
   readonly screenshotFileName: string;
   readonly screenshotBytes: number;
-  readonly mimeType: "image/png";
+  readonly mimeType: "image/png" | "image/jpeg";
   readonly summaryText: string;
   readonly summaryCreatedAt: number;
   readonly provider: AiBrainProviderKind;
@@ -50,6 +50,7 @@ export type AddVisionEntryInput = {
   readonly petId: string;
   readonly capturedAt?: number;
   readonly screenshot: Uint8Array;
+  readonly mimeType?: "image/png" | "image/jpeg";
   readonly summaryText: string;
   readonly summaryCreatedAt?: number;
   readonly provider: AiBrainProviderKind;
@@ -58,8 +59,8 @@ export type AddVisionEntryInput = {
 
 export const visionRetentionMs = 24 * 60 * 60 * 1_000;
 export const maxVisionEntries = 72;
-export const maxVisionScreenshotBytes = 5 * 1_024 * 1_024;
-export const maxVisionRetainedScreenshotBytes = 150 * 1_024 * 1_024;
+export const maxVisionScreenshotBytes = 1 * 1_024 * 1_024;
+export const maxVisionRetainedScreenshotBytes = 48 * 1_024 * 1_024;
 export const maxVisionSummaryCharacters = 900;
 export const maxVisionIndexBytes = 512 * 1_024;
 export const visionStorageDirectoryName = "openpets-vision";
@@ -67,7 +68,7 @@ export const visionStorageDirectoryName = "openpets-vision";
 const maxFutureSkewMs = 5 * 60 * 1_000;
 const safeEntryIdPattern = /^[A-Za-z0-9._:-]{1,120}$/;
 const visionIndexTempPattern = /^openpets-vision-index\.json\.\d+\.tmp$/;
-const providers = new Set<AiBrainProviderKind>(["none", "anthropic", "openai", "ollama", "codex"]);
+const providers = new Set<AiBrainProviderKind>(["none", ...hostAiProviderIds, "codex"]);
 
 export class VisionStore {
   readonly storageDirectory: string;
@@ -117,7 +118,8 @@ export class VisionStore {
     if (!summaryText) throw new Error("Vision summary is required.");
     const capturedAt = normalizeTimestamp(input.capturedAt ?? Date.now());
     const summaryCreatedAt = normalizeTimestamp(input.summaryCreatedAt ?? capturedAt);
-    const screenshotFileName = `${id}.png`;
+    const mimeType = input.mimeType ?? "image/png";
+    const screenshotFileName = `${id}.${mimeType === "image/jpeg" ? "jpg" : "png"}`;
     const screenshotPath = join(this.screenshotsDirectory, screenshotFileName);
     const temporaryPath = `${screenshotPath}.${process.pid}.tmp`;
     const entry: VisionStoredEntry = {
@@ -127,7 +129,7 @@ export class VisionStore {
       expiresAt: capturedAt + visionRetentionMs,
       screenshotFileName,
       screenshotBytes: input.screenshot.byteLength,
-      mimeType: "image/png",
+      mimeType,
       summaryText,
       summaryCreatedAt,
       provider: providers.has(input.provider) ? input.provider : "none",
@@ -174,12 +176,12 @@ export class VisionStore {
 
   prune(now = Date.now()): VisionStoreSnapshot {
     const normalizedNow = normalizeTimestamp(now);
-    const previousIds = new Set(this.#entries.map((entry) => entry.id));
+    const previousFiles = new Map(this.#entries.map((entry) => [entry.id, entry.screenshotFileName]));
     const next = this.#normalizeEntries(this.#entries, normalizedNow);
     const nextIds = new Set(next.map((entry) => entry.id));
     this.#entries = next;
-    for (const id of previousIds) {
-      if (!nextIds.has(id)) this.#removeScreenshot(`${id}.png`);
+    for (const [id, fileName] of previousFiles) {
+      if (!nextIds.has(id)) this.#removeScreenshot(fileName);
     }
     this.#cleanupOrphans();
     this.#cleanupIndexTemps();
@@ -241,11 +243,16 @@ export class VisionStore {
         || typeof item.capturedAt !== "number"
         || !Number.isFinite(item.capturedAt)
         || typeof item.screenshotFileName !== "string"
-        || item.screenshotFileName !== `${item.id}.png`
         || typeof item.summaryCreatedAt !== "number"
         || !Number.isFinite(item.summaryCreatedAt)
         || typeof item.provider !== "string"
         || !providers.has(item.provider as AiBrainProviderKind)) continue;
+      const mimeType = item.mimeType === "image/jpeg" && item.screenshotFileName === `${item.id}.jpg`
+        ? "image/jpeg" as const
+        : (item.mimeType === "image/png" || item.mimeType === undefined) && item.screenshotFileName === `${item.id}.png`
+          ? "image/png" as const
+          : undefined;
+      if (!mimeType) continue;
       const capturedAt = Math.floor(item.capturedAt);
       if (capturedAt < cutoff || capturedAt > futureLimit) continue;
       const summaryText = normalizeSummary(item.summaryText);
@@ -261,7 +268,7 @@ export class VisionStore {
         expiresAt: capturedAt + visionRetentionMs,
         screenshotFileName: item.screenshotFileName,
         screenshotBytes,
-        mimeType: "image/png",
+        mimeType,
         summaryText,
         summaryCreatedAt: Math.floor(item.summaryCreatedAt),
         provider: item.provider as AiBrainProviderKind,
@@ -314,7 +321,7 @@ export class VisionStore {
   }
 
   #removeScreenshot(fileName: string): void {
-    if (!/^[A-Za-z0-9._:-]{1,120}\.png$/.test(fileName)) return;
+    if (!/^[A-Za-z0-9._:-]{1,120}\.(?:png|jpg)$/.test(fileName)) return;
     try {
       rmSync(join(this.screenshotsDirectory, fileName), { force: true });
     } catch {

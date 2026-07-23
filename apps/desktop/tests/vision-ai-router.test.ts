@@ -39,7 +39,11 @@ try {
 
   setVisionModelPreference({ owner: "host-ai", provider: "openai", model: "host-vision" });
   await router.probeImageSummary({ force: true });
-  assert.deepEqual(calls.pop(), { gateway: "codex", options: { force: true, model: undefined } }, "a host provider preference cannot switch or override the active Codex brain");
+  assert.deepEqual(
+    calls.pop(),
+    { gateway: "host-ai", options: { force: true, provider: "openai", model: "host-vision" } },
+    "a Vision override may use a configured provider independently from the conversation brain",
+  );
 
   setVisionModelPreference({ owner: "codex", model: "codex-vision" });
   await router.probeImageSummary({ force: true });
@@ -49,11 +53,23 @@ try {
   setActiveHostAiProvider("openai");
   setVisionModelPreference({ owner: "host-ai", provider: "openai", model: "host-vision" });
   await router.probeImageSummary({ force: true });
-  assert.deepEqual(calls.pop(), { gateway: "host-ai", options: { force: true, model: "host-vision" } }, "the active direct provider may use its own Vision model override");
+  assert.deepEqual(calls.pop(), { gateway: "host-ai", options: { force: true, provider: "openai", model: "host-vision" } });
 
   setActiveHostAiProvider("anthropic");
   await router.probeImageSummary({ force: true });
-  assert.deepEqual(calls.pop(), { gateway: "host-ai", options: { force: true, model: undefined } }, "switching direct providers ignores a stale override instead of silently using another provider");
+  assert.deepEqual(
+    calls.pop(),
+    { gateway: "host-ai", options: { force: true, provider: "openai", model: "host-vision" } },
+    "the explicit Vision override remains stable when the conversation provider changes",
+  );
+
+  setVisionModelPreference(undefined);
+  await router.probeImageSummary({ force: true });
+  assert.deepEqual(
+    calls.pop(),
+    { gateway: "host-ai", options: { force: true, provider: "anthropic" } },
+    "without an override, Vision follows the active AI Brain",
+  );
 
   console.log("Vision AI routing boundaries verified");
 } finally {

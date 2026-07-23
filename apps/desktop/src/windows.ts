@@ -458,23 +458,19 @@ export function installInternalUiHandlers(): void {
 
   ipcMain.handle("openpets:vision-model-preference-set", async (event, value: unknown) => {
     assertAllowedSender(event, ["control-center"]);
-    const companion = getCompanionSettings();
-    const { getHostAiSettings } = await import("./host-ai-settings.js");
+    const { isHostAiProviderId } = await import("./host-ai-settings.js");
     const { setVisionModelPreference } = await import("./vision-settings.js");
     if (value === null || value === undefined) {
       setVisionModelPreference(undefined);
     } else {
       if (!isPlainObject(value) || typeof value.model !== "string" || !value.model.trim()) throw new Error("Choose a valid Vision model.");
       const model = value.model.trim().slice(0, 160);
-      if (companion.target === "codex") {
-        if (value.owner !== "codex") throw new Error("Pet Vision can only override the active AI Brain.");
+      if (value.owner === "codex") {
         setVisionModelPreference({ owner: "codex", model });
+      } else if (value.owner === "host-ai" && isHostAiProviderId(value.provider)) {
+        setVisionModelPreference({ owner: "host-ai", provider: value.provider, model });
       } else {
-        const provider = getHostAiSettings().provider;
-        if (provider === "none" || value.owner !== "host-ai" || value.provider !== provider) {
-          throw new Error("Pet Vision can only override the active AI provider.");
-        }
-        setVisionModelPreference({ owner: "host-ai", provider, model });
+        throw new Error("Choose a Vision model from AI Brain settings.");
       }
     }
     invalidateVisionSummaryHealth();

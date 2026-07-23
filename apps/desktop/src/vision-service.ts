@@ -449,6 +449,7 @@ export class VisionService {
         petId,
         capturedAt: this.#lastCaptureAt,
         screenshot: captured.image,
+        mimeType: captured.mimeType,
         summaryText: summary.text,
         summaryCreatedAt: completedAt,
         provider: summary.provider,

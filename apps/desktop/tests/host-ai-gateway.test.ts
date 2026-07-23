@@ -98,7 +98,7 @@ const catalogGateway = new HostAiGateway(secrets, {
   fetch: (async (_input: string | URL | Request, init?: RequestInit) => {
     catalogHeaders = new Headers(init?.headers);
     return Response.json({ data: [
-      { id: "provider/free-model:free", name: "Free Model" },
+      { id: "provider/free-model:free", name: "Free Model", architecture: { input_modalities: ["text", "image"] } },
       { id: "provider/free-model:free", name: "Duplicate" },
       { id: "", name: "Invalid" },
     ] });
@@ -107,7 +107,7 @@ const catalogGateway = new HostAiGateway(secrets, {
 const catalog = await catalogGateway.listModels("openrouter");
 assert.deepEqual(catalog.models, [
   { id: "openrouter/free", name: "OpenRouter Free Models Router" },
-  { id: "provider/free-model:free", name: "Free Model" },
+  { id: "provider/free-model:free", name: "Free Model", inputModalities: ["text", "image"] },
 ]);
 assert.equal(catalogHeaders.get("authorization"), "Bearer test-key");
 assert.equal(catalogHeaders.get("HTTP-Referer"), "https://openpets.dev");

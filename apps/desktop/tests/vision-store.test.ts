@@ -49,6 +49,21 @@ try {
   assert.equal(existsSync(join(store.screenshotsDirectory, "first.png")), true, "rejecting an id collision preserves the retained screenshot");
   assert.equal(store.getContextSummaries({ petId: "default", now })[0]?.summaryText, "The user is working in a code editor.");
 
+  const compressed = store.addCompletedEntry({
+    id: "compressed",
+    petId: "default",
+    capturedAt: now,
+    screenshot: new Uint8Array([255, 216, 255, 217]),
+    mimeType: "image/jpeg",
+    summaryText: "The user is reviewing a dashboard.",
+    provider: "openrouter",
+    model: "provider/vision-model",
+  });
+  assert.equal(compressed.entry.screenshotFileName, "compressed.jpg");
+  assert.equal(compressed.entry.mimeType, "image/jpeg");
+  assert.equal(compressed.entry.provider, "openrouter", "OpenRouter Vision context remains valid after persistence");
+  assert.equal(existsSync(join(store.screenshotsDirectory, "compressed.jpg")), true);
+
   store.addCompletedEntry({
     id: "expired",
     petId: "default",

@@ -174,7 +174,7 @@ output completion. Default-pet reactions arriving from coding-agent IPC remain
 recorded but cannot replace the listening, working, or response bubble until
 that lease ends. After spoken output and the Companion turn both complete, the
 default-on follow-up preference immediately reopens that listening state for
-three seconds without displaying a countdown; the completed response remains
+five seconds without displaying a countdown; the completed response remains
 below its red **Listening** header during that window. Speech onset clears the
 short no-speech timer; conversational endpointing tolerates natural pauses and
 keeps the turn open for up to 30 seconds. Silence before speech clears the bubble and returns to
@@ -281,7 +281,8 @@ and diagnosable:
   the matching bubble's ordinary auto-narration so one answer has one TTS owner.
 - **Vision** is a separate default-off capability presented as a concise
   **Pet Vision** switch, one live Working/Setup needed status row, an optional
-  model override scoped to the active AI Brain provider, and an **Open Storage
+  model override that can use any verified image-capable model from configured
+  AI Brain providers, and an **Open Storage
   Folder** action. **Check Vision** always performs a non-capturing
   screen/provider readiness probe, including while Vision is off or paused.
   Temporary 30/60/90-minute pause/resume controls remain in the tray menu so the
@@ -318,8 +319,8 @@ and diagnosable:
   models. Persisted catalog IDs are resolved back to Codex's executable model
   names before a turn. Codex never routes through the direct-provider fields.
   Readiness is shown as **AI Brain Ready/Needs Attention** for ordinary
-  conversation plus a separate, non-blocking Vision Supported/Not
-  Supported/Needs Attention result. Checking a provider evaluates both paths,
+  conversation plus a separate, non-blocking Pet Vision Ready/Not
+  available/Needs attention result. Checking a provider evaluates both paths,
   but a Vision limitation never disables a working conversational brain. The
   Vision result links directly to Pet Vision settings.
 
@@ -330,8 +331,8 @@ paused, suspended, locked, or while the default pet is hidden/paused. The
 service rechecks the same pet ID, visibility, and pause state before capture,
 after capture, and before persistence so an in-flight eligibility change cannot
 retain or summarize a late screenshot. The
-Electron adapter checks OS screen-capture permission and downsizes PNGs to the
-bounded image input. `VisionAiRouter` sends the screenshot to the selected
+Electron adapter checks OS screen-capture permission and encodes a bounded
+1280×800 JPEG for the image input. `VisionAiRouter` sends the screenshot to the selected
 global AI Brain: Codex receives it through the official CLI image input, while
 the direct API target uses Anthropic, OpenAI, OpenRouter, Ollama, or a custom
 OpenAI-compatible image input. Both receive an instruction to produce
@@ -343,18 +344,18 @@ that passed one provider's probe cannot be sent to an unprobed replacement. A su
 saved only after non-empty image summarization succeeds; neither screenshots,
 paths, nor summary text cross the renderer IPC boundary.
 
-Pet Vision may store a model override for its active AI Brain, but never a
-different provider or target. Selecting Codex limits the override to a Codex
-image-capable model; selecting a direct provider limits it to that provider's
-catalog and existing credentials. A saved override from another provider is
-ignored after the active brain changes. **Use AI Brain default** removes the
-override.
+Pet Vision may store an optional model override independently from the active
+conversation brain. The selector combines Codex image-capable models with
+direct-provider models that report image input in their AI Brain catalogs; a
+previously verified configured model remains selectable even when its catalog
+does not expose modality metadata. The selected provider's existing endpoint
+and credentials are reused. **Use active AI Brain default** removes the override.
 
 Screenshots and summaries live under `userData/openpets-vision/` and are pruned
 on startup, reads, and a periodic timer. Vision-owned atomic index temp files
 are also removed on startup, pruning, and disable so a crash cannot extend
 summary retention. Retention is at most 24 hours and is
-also capped at 72 entries, 5 MiB per screenshot, 150 MiB of screenshots, 900
+also capped at 72 entries, 1 MiB per screenshot, 48 MiB of screenshots, 900
 characters per summary, and a 512 KiB index. Pause retains existing context
 until normal expiry but suppresses new capture and proactive Vision candidates.
 Only summaries from roughly the last 30 minutes may create a Vision-aware
@@ -515,7 +516,7 @@ Host-owned persistence is deliberately separate from installed-pet app state:
 - `openpets-vision-settings.json` — dedicated default-off Vision consent, an
   optional bounded pause deadline, and an optional active-provider-only model
   preference.
-- `openpets-vision/` — atomic Vision index plus bounded PNG screenshots and
+- `openpets-vision/` — atomic Vision index plus bounded compressed JPEG screenshots and
   summaries, all on the rolling 24-hour retention cycle.
 - `openpets-host-ai-settings.json` — versioned provider profiles plus the one
   active direct provider for Anthropic, OpenAI, OpenRouter, Ollama, and custom

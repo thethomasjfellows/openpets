@@ -45,7 +45,7 @@ type HostAiProfileId = "anthropic" | "openai" | "openrouter" | "ollama" | "custo
 type HostAiProviderConfig = { model: string; baseUrl: string; requiresApiKey: boolean };
 type HostAiSettingsSnapshot = { version: 2; provider: "none" | HostAiProfileId; providers: Record<HostAiProfileId, HostAiProviderConfig> };
 type HostAiSecretStatus = Record<HostAiProfileId, { hasKey: boolean }>;
-type HostAiModelCatalog = { provider: HostAiProfileId; models: Array<{ id: string; name: string }> };
+type HostAiModelCatalog = { provider: HostAiProfileId; models: Array<{ id: string; name: string; inputModalities?: string[] }> };
 type PluginPlatformSettings = {
   allowPluginAudio: boolean;
   allowDynamicSpeech: boolean;
@@ -1824,7 +1824,7 @@ function AiBrainSettingsPanel({ settings, busy, onSettings, onNavigate, onOpenVi
     : defaultCodexModel;
   const codexModelOptions = [
     { value: "", label: defaultCodexModel ? `Use Codex default (${defaultCodexModel.displayName})` : "Use Codex default" },
-    ...(codexModels?.models ?? []).map((model) => ({ value: model.model, label: `${model.displayName}${model.inputModalities.includes("image") ? " · Vision" : " · Text only"}` })),
+    ...(codexModels?.models ?? []).map((model) => ({ value: model.model, label: `${model.displayName}${model.inputModalities.includes("image") ? " (supports vision)" : " (text only)"}` })),
   ];
   const reasoningOptions = [
     { value: "", label: selectedCodexModel?.defaultReasoningEffort ? `Use model default (${selectedCodexModel.defaultReasoningEffort})` : "Use model default" },
@@ -1921,6 +1921,7 @@ function AbilitiesSettingsPanel({ section, settings, secrets, busy, onSettings, 
 }) {
   const { t } = useI18n();
   const providerIds: VoiceProviderId[] = ["system", "pockettts", "openai-compatible", "elevenlabs"];
+  const visionProviderIds: HostAiProfileId[] = ["anthropic", "openai", "openrouter", "ollama", "custom"];
   const [health, setHealth] = useState<Partial<Record<VoiceProviderId, VoiceCapabilityEvidence>>>({});
   const [voices, setVoices] = useState<Partial<Record<VoiceProviderId, VoiceInfo[]>>>({});
   const [keyDrafts, setKeyDrafts] = useState<Record<string, string>>({});
@@ -1932,7 +1933,7 @@ function AbilitiesSettingsPanel({ section, settings, secrets, busy, onSettings, 
   const [vision, setVision] = useState<VisionSnapshot | null>(null);
   const [visionBrainSettings, setVisionBrainSettings] = useState<HostAiSettingsSnapshot | null>(null);
   const [visionCodexModels, setVisionCodexModels] = useState<CodexModelDiscoverySnapshot | null>(null);
-  const [visionHostModels, setVisionHostModels] = useState<HostAiModelCatalog | null>(null);
+  const [visionHostModels, setVisionHostModels] = useState<Partial<Record<HostAiProfileId, HostAiModelCatalog>>>({});
   const [pocketTts, setPocketTts] = useState<PocketTtsSnapshot | null>(null);
   const [transcriptionSettings, setTranscriptionSettings] = useState<VoiceTranscriptionSettings | null>(null);
   const [transcriptionHealth, setTranscriptionHealth] = useState<VoiceTranscriptionHealth | null>(null);
@@ -1988,11 +1989,13 @@ function AbilitiesSettingsPanel({ section, settings, secrets, busy, onSettings, 
       ]);
       setVisionBrainSettings(brainSettings);
       setVisionCodexModels(models);
-      if (companionResult.status === "fulfilled" && companionResult.value.target === "host-ai" && brainSettings && brainSettings.provider !== "none") {
-        setVisionHostModels(await api.getHostAiModels(brainSettings.provider).catch(() => null));
-      } else {
-        setVisionHostModels(null);
-      }
+      const catalogs = await Promise.all(visionProviderIds.map(async (provider) => ({
+        provider,
+        catalog: await api.getHostAiModels(provider).catch(() => null),
+      })));
+      setVisionHostModels(Object.fromEntries(
+        catalogs.filter((entry) => entry.catalog).map((entry) => [entry.provider, entry.catalog]),
+      ));
     }
     if (section === "listen") await refreshMicrophones().catch(() => undefined);
     const relevantResults = section === "listen"
@@ -2119,12 +2122,9 @@ function AbilitiesSettingsPanel({ section, settings, secrets, busy, onSettings, 
   const saveVisionModel = (model: string) => void run(t("settings.busy.checking"), async () => {
     if (!model) {
       setVision(await api.setVisionModelPreference(null));
-    } else if (companionSettings?.target === "codex") {
-      setVision(await api.setVisionModelPreference({ owner: "codex", model }));
     } else {
-      const provider = visionBrainSettings?.provider;
-      if (!provider || provider === "none") throw new Error(t("settings.aiBrain.chooseProvider"));
-      setVision(await api.setVisionModelPreference({ owner: "host-ai", provider, model }));
+      const preference = JSON.parse(model) as VisionModelPreference;
+      setVision(await api.setVisionModelPreference(preference));
     }
     setMessage(t("settings.abilities.vision.modelSaved"));
   });
@@ -2227,26 +2227,44 @@ function AbilitiesSettingsPanel({ section, settings, secrets, busy, onSettings, 
       : visionStatus === "working"
         ? "settings.abilities.vision.working"
         : "settings.abilities.vision.status.setupNeeded");
-  const activeVisionPreference = companionSettings?.target === "codex"
-    ? vision?.modelPreference?.owner === "codex" ? vision.modelPreference.model : ""
-    : vision?.modelPreference?.owner === "host-ai" && vision.modelPreference.provider === visionBrainSettings?.provider
-      ? vision.modelPreference.model
-      : "";
-  const activeHostVisionModel = visionBrainSettings && visionBrainSettings.provider !== "none"
-    ? visionBrainSettings.providers[visionBrainSettings.provider].model
-    : "";
-  const visionModelOptions = companionSettings?.target === "codex"
-    ? [
-        { value: "", label: t("settings.abilities.vision.useAiBrainDefault") },
-        ...(visionCodexModels?.models ?? []).filter((model) => model.inputModalities.includes("image")).map((model) => ({ value: model.model, label: model.displayName })),
-      ]
-    : [
-        { value: "", label: t("settings.abilities.vision.useAiBrainDefault") },
-        ...(visionHostModels?.models ?? []).map((model) => ({ value: model.id, label: model.name === model.id ? model.id : `${model.name} · ${model.id}` })),
-        ...(!visionHostModels?.models.some((model) => model.id === activeHostVisionModel) && activeHostVisionModel
-          ? [{ value: activeHostVisionModel, label: activeHostVisionModel }]
+  const activeVisionPreference = vision?.modelPreference ? JSON.stringify(vision.modelPreference) : "";
+  const visionModelOptions = [
+    { value: "", label: t("settings.abilities.vision.useAiBrainDefault") },
+    ...(visionCodexModels?.models ?? [])
+      .filter((model) => model.inputModalities.includes("image"))
+      .map((model) => ({
+        value: JSON.stringify({ owner: "codex", model: model.model }),
+        label: `[${t("settings.aiBrain.codex")}] ${model.displayName}`,
+      })),
+    ...visionProviderIds.flatMap((provider) => {
+      const catalog = visionHostModels[provider];
+      const configuredModel = visionBrainSettings?.providers[provider].model ?? "";
+      const verifiedConfiguredModel = Boolean(
+        configuredModel
+        && vision?.summary.ready
+        && vision.summary.provider === provider
+        && vision.summary.model === configuredModel,
+      );
+      const models = [
+        ...(catalog?.models.filter((model) => model.inputModalities?.includes("image")) ?? []),
+        ...(verifiedConfiguredModel && !catalog?.models.some((model) => model.id === configuredModel)
+          ? [{ id: configuredModel, name: configuredModel, inputModalities: ["image"] }]
           : []),
-      ].filter((option, index, options) => option.value === "" || Boolean(option.value) && options.findIndex((candidate) => candidate.value === option.value) === index);
+      ];
+      return models.map((model) => ({
+        value: JSON.stringify({ owner: "host-ai", provider, model: model.id }),
+        label: `[${t(`settings.aiBrain.provider.${provider}`)}] ${model.name === model.id ? model.id : `${model.name} · ${model.id}`}`,
+      }));
+    }),
+    ...(vision?.modelPreference
+      ? [{
+          value: JSON.stringify(vision.modelPreference),
+          label: vision.modelPreference.owner === "codex"
+            ? `[${t("settings.aiBrain.codex")}] ${vision.modelPreference.model}`
+            : `[${t(`settings.aiBrain.provider.${vision.modelPreference.provider}`)}] ${vision.modelPreference.model}`,
+        }]
+      : []),
+  ].filter((option, index, options) => options.findIndex((candidate) => candidate.value === option.value) === index);
   const wakeHasRecentPcm = Boolean(
     wakeSnapshot?.diagnostics?.lastPcmFrameAt
     && wakeSnapshot.diagnostics.pcmFramesReceived > 0
@@ -2415,7 +2433,7 @@ function AbilitiesSettingsPanel({ section, settings, secrets, busy, onSettings, 
     {section === "vision" && <div className="settings-group">
       <ToggleRow title={t("settings.abilities.vision.toggle")} description={t("settings.abilities.vision.toggleDescription")} checked={vision?.enabled ?? false} disabled={busy || !vision} onChange={setVisionEnabled} />
       <div className="settings-row"><div className="settings-row-info"><strong>{t("settings.abilities.vision.statusLabel")}</strong><small>{vision?.capture.reason ?? vision?.summary.reason ?? (visionWorking ? t("settings.abilities.vision.checkReady") : visionPaused ? t("settings.abilities.vision.pauseDescription") : t("settings.abilities.vision.offDescription"))}</small></div><div className="flex gap-2 items-center"><span className={visionWorking ? "pill pill-green" : vision?.enabled && !visionPaused ? "pill pill-orange" : "pill pill-slate"}>{compactVisionStatus}</span>{vision?.capture.status === "permission-denied" && screenPermission?.canRequest && <Button variant="primary" size="compact" disabled={busy} onClick={() => requestPermission("screen-recording")}>{t("settings.permissions.allowScreenAccess")}</Button>}<Button variant="secondary" size="compact" disabled={busy} onClick={checkVision}>{t("settings.abilities.vision.checkVision")}</Button>{vision?.capture.status === "permission-denied" && offerScreenRestart && <Button variant="secondary" size="compact" disabled={busy} onClick={() => void api.restartForDesktopPermissions()}>{t("settings.permissions.restart")}</Button>}</div></div>
-      <VoiceSelectRow title={t("settings.abilities.vision.model")} description={t("settings.abilities.vision.modelDescription")} value={activeVisionPreference} disabled={busy || !companionSettings || visionBrainSettings?.provider === "none" && companionSettings.target === "host-ai"} onChange={saveVisionModel} options={visionModelOptions} />
+      <VoiceSelectRow title={t("settings.abilities.vision.model")} description={t("settings.abilities.vision.modelDescription")} value={activeVisionPreference} disabled={busy || !companionSettings} onChange={saveVisionModel} options={visionModelOptions} />
       <div className="settings-row"><div className="settings-row-info"><strong>{t("settings.abilities.vision.storage")}</strong><small>{t("settings.abilities.vision.privacy")}</small></div><Button variant="secondary" size="compact" disabled={busy || !vision} onClick={openVisionStorage}>{t("settings.abilities.vision.openStorage")}</Button></div>
     </div>}
 

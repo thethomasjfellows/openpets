@@ -243,7 +243,7 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 - `voice-wake-sherpa-manifest.ts`: Manifest v2 provenance/build-input digest, current-platform helper/runtime-library, explicit KWS/VAD asset, legal-file, path, symlink, size, checksum, and executable validation.
 - `voice-wake-smoke-attestation.ts`: Pure target/hash validation for native smoke evidence consumed by package staging.
 - `voice-wake-sherpa-runtime.ts`: One-session helper spawn/ready/event/backpressure/abort/stop/crash lifecycle; production derives availability by validating `resources/voice-wake/sherpa-onnx`.
-- `voice-wake-runtime.ts` / `voice-wake-word-service.ts` / `voice-wake-activation.ts`: Injectable runtime/capture interfaces and host-owned wake coordinator with visible acknowledgement, separate-command gating, a start-only no-command guard plus bounded long utterances, completed-response follow-up presentation, default-on three-second follow-up turns, fast cancellation, and timeout cleanup.
+- `voice-wake-runtime.ts` / `voice-wake-word-service.ts` / `voice-wake-activation.ts`: Injectable runtime/capture interfaces and host-owned wake coordinator with visible acknowledgement, separate-command gating, a start-only no-command guard plus bounded long utterances, completed-response follow-up presentation, default-on five-second follow-up turns, fast cancellation, and timeout cleanup.
 - `voice-conversation-shortcut-core.ts` / `voice-conversation-shortcut.ts`: Testable Control+backtick accelerator contract plus Electron global registration for cancelling false wakes, provider work, and speech without consuming Escape.
 
 **IPC**:

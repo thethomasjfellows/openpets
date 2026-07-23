@@ -95,7 +95,7 @@ type WakeDiagnostics = NonNullable<VoiceWakeSnapshot["diagnostics"]>;
 
 const cooldownMs = 750;
 const activationTimeoutMs = 8_000;
-const followUpTimeoutMs = 3_000;
+export const defaultFollowUpTimeoutMs = 5_000;
 
 export class VoiceWakeWordService {
   readonly #runtime: VoiceWakeRuntime;
@@ -164,7 +164,7 @@ export class VoiceWakeWordService {
     this.#presentation = options.presentation;
     this.#presentationHoldMs = Math.max(0, Math.min(30_000, Math.round(options.presentationHoldMs ?? 12_000)));
     this.#activationTimeoutMs = Math.max(10, Math.min(60_000, Math.round(options.activationTimeoutMs ?? activationTimeoutMs)));
-    this.#followUpTimeoutMs = Math.max(10, Math.min(10_000, Math.round(options.followUpTimeoutMs ?? followUpTimeoutMs)));
+    this.#followUpTimeoutMs = Math.max(10, Math.min(10_000, Math.round(options.followUpTimeoutMs ?? defaultFollowUpTimeoutMs)));
     this.#getCompanionSettings = options.getCompanionSettings ?? getCompanionSettings;
     this.#getVoiceSettings = options.getVoiceSettings ?? getVoiceSettings;
     this.#getDefaultPetId = options.getDefaultPetId ?? (() => { throw new Error("Default pet resolution is not available in this build."); });

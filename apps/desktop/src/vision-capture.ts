@@ -14,7 +14,7 @@ export type VisionCaptureHealth = {
 
 export type VisionCapturedScreen = {
   readonly image: Uint8Array;
-  readonly mimeType: "image/png";
+  readonly mimeType: "image/png" | "image/jpeg";
 };
 
 export type VisionCaptureAdapter = {
@@ -27,7 +27,8 @@ export type ElectronVisionCaptureOptions = {
   readonly now?: () => number;
 };
 
-const captureThumbnailSize = { width: 1600, height: 1000 };
+const captureThumbnailSize = { width: 1280, height: 800 };
+const captureJpegQuality = 72;
 
 export function createElectronVisionCapture(options: ElectronVisionCaptureOptions = {}): VisionCaptureAdapter {
   const now = options.now ?? Date.now;
@@ -77,16 +78,16 @@ export function createElectronVisionCapture(options: ElectronVisionCaptureOption
       if (!source || source.thumbnail.isEmpty()) throw new Error("OpenPets could not capture the current screen.");
 
       let image = source.thumbnail;
-      let png = image.toPNG();
-      for (const width of [1400, 1200, 1000, 800]) {
-        if (png.byteLength <= maxVisionScreenshotBytes) break;
+      let jpeg = image.toJPEG(captureJpegQuality);
+      for (const width of [1120, 960, 800, 640]) {
+        if (jpeg.byteLength <= maxVisionScreenshotBytes) break;
         image = image.resize({ width, quality: "good" });
-        png = image.toPNG();
+        jpeg = image.toJPEG(captureJpegQuality);
       }
-      if (png.byteLength === 0 || png.byteLength > maxVisionScreenshotBytes) {
+      if (jpeg.byteLength === 0 || jpeg.byteLength > maxVisionScreenshotBytes) {
         throw new Error("The screen capture exceeded the local Vision size limit.");
       }
-      return { image: Uint8Array.from(png), mimeType: "image/png" };
+      return { image: Uint8Array.from(jpeg), mimeType: "image/jpeg" };
     },
   };
 }

@@ -10,7 +10,9 @@ import type {
   VoiceWakeRuntimeSession,
 } from "../src/voice-wake-runtime.js";
 import type { VoicePcmFrame } from "../src/voice-wake-types.js";
-import { VoiceWakeWordService } from "../src/voice-wake-word-service.js";
+import { defaultFollowUpTimeoutMs, VoiceWakeWordService } from "../src/voice-wake-word-service.js";
+
+assert.equal(defaultFollowUpTimeoutMs, 5_000, "follow-up listening leaves a comfortable window for the user to begin speaking");
 
 let frameListener: ((frame: VoicePcmFrame) => void) | null = null;
 let captureEndedListener: ((reason: string) => void) | null = null;
