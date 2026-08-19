@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { errorResponse, maxIpcMessageBytes, parseIpcRequest, validateReaction, validateSayMessage, validateInstallLocalKind, validateInstallLocalPath, validateMediaClickUrl, validateMediaDurationMs, validateMediaPath } from "../src/local-ipc-protocol.js";
+import { errorResponse, maxIpcMessageBytes, parseIpcRequest, validateReaction, validateSayMessage, validateInstallLocalKind, validateInstallLocalPath, validateIntegrationEvent, validateMediaClickUrl, validateMediaDurationMs, validateMediaPath } from "../src/local-ipc-protocol.js";
 
 const token = "test-token";
 const valid = {
@@ -14,6 +14,7 @@ const valid = {
 parseIpcRequest(JSON.stringify(valid), token);
 parseIpcRequest(JSON.stringify({ ...valid, method: "pets.list" }), token);
 parseIpcRequest(JSON.stringify({ ...valid, method: "pets.install-local" }), token);
+parseIpcRequest(JSON.stringify({ ...valid, method: "integration.event" }), token);
 assert.throws(() => parseIpcRequest(JSON.stringify({ ...valid, token: "bad" }), token));
 assert.throws(() => parseIpcRequest(JSON.stringify({ ...valid, version: 2 }), token));
 assert.throws(() => parseIpcRequest(JSON.stringify({ ...valid, method: "pet.install" }), token));
@@ -77,6 +78,15 @@ assert.throws(() => validateInstallLocalPath("a".repeat(2049)));
 assert.equal(validateInstallLocalKind("zip"), "zip");
 assert.equal(validateInstallLocalKind("folder"), "folder");
 assert.throws(() => validateInstallLocalKind("file"));
+
+assert.deepEqual(validateIntegrationEvent({ integrationId: "codex", lifecycle: "editing", occurredAt: 1234.9, prompt: "never persist this" }), {
+  integrationId: "codex",
+  lifecycle: "editing",
+  occurredAt: 1234,
+});
+assert.throws(() => validateIntegrationEvent({ integrationId: "other", lifecycle: "editing", occurredAt: 1234 }));
+assert.throws(() => validateIntegrationEvent({ integrationId: "codex", lifecycle: "prompt", occurredAt: 1234 }));
+assert.throws(() => validateIntegrationEvent({ integrationId: "codex", lifecycle: "editing", occurredAt: 0 }));
 
 const response = errorResponse("1", new Error("boom"));
 if (response.ok || response.error?.code !== "internal_error") {

@@ -53,7 +53,7 @@ async function checkMcpServerContract(): Promise<void> {
     releaseLease: async () => ({ released: true }),
     react: async (reaction: string, options?: { readonly leaseId?: string }) => ({ ok: true, reaction, leaseId: options?.leaseId }),
     say: async (message: string, options?: { readonly leaseId?: string }) => ({ ok: true, message, leaseId: options?.leaseId }),
-    showMedia: async () => ({ ok: true, shown: true }),
+    showMedia: async (path: string, options?: { readonly leaseId?: string }) => ({ ok: true, shown: true, path, leaseId: options?.leaseId }),
     hello: async () => ({ ok: true }),
   };
   const server = createOpenPetsMcpServer({ configuredPetId: "snoopy", client: fakeClient, lease: { lease: await fakeClient.acquireLease() }, leaseReady: Promise.resolve() });
@@ -63,7 +63,7 @@ async function checkMcpServerContract(): Promise<void> {
   try {
     const tools = await client.listTools();
     const names = tools.tools.map((tool) => tool.name).sort();
-    if (names.join(",") !== "openpets_react,openpets_say,openpets_status") {
+    if (names.join(",") !== "openpets_react,openpets_say,openpets_show_media,openpets_status") {
       throw new Error(`Unexpected MCP tool list: ${names.join(",")}`);
     }
 
@@ -83,6 +83,14 @@ async function checkMcpServerContract(): Promise<void> {
 
     const invalidSay = await client.callTool({ name: "openpets_say", arguments: { message: "const secret = 1" } }, CallToolResultSchema);
     if (!invalidSay.isError) throw new Error("Unsafe say message was not rejected.");
+
+    const media = await client.callTool({ name: "openpets_show_media", arguments: { path: "/tmp/openpets-result.png" } }, CallToolResultSchema);
+    if (media.isError) throw new Error("Valid media request unexpectedly failed.");
+    const mediaStructured = media.structuredContent as { readonly result?: { readonly leaseId?: string; readonly path?: string } } | undefined;
+    if (mediaStructured?.result?.leaseId !== "lease-1" || mediaStructured.result.path !== "/tmp/openpets-result.png") throw new Error("Media request did not preserve its path and lease target.");
+
+    const invalidMedia = await client.callTool({ name: "openpets_show_media", arguments: { path: "./relative.png" } }, CallToolResultSchema);
+    if (!invalidMedia.isError) throw new Error("Relative media path was not rejected.");
 
     const stale = createMcpStatus({ ok: false, appRunning: true, leaseId: "missing", leaseActive: false, staleReason: "unknown_lease" }, "snoopy", undefined, "missing", "missing");
     if (stale.leaseActive !== false || stale.staleReason !== "unknown_lease" || stale.ok !== false) {
@@ -107,7 +115,7 @@ async function checkStdioServerContract(): Promise<void> {
     await client.connect(transport);
     const tools = await client.listTools();
     const names = tools.tools.map((tool) => tool.name).sort();
-    if (names.join(",") !== "openpets_react,openpets_say,openpets_status") {
+    if (names.join(",") !== "openpets_react,openpets_say,openpets_show_media,openpets_status") {
       throw new Error(`Unexpected stdio MCP tool list: ${names.join(",")}`);
     }
 

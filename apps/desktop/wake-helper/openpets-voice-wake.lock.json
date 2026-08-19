@@ -1,0 +1,130 @@
+{
+  "version": 1,
+  "bundleVersion": "1.0.0",
+  "sherpaOnnxVersion": "1.13.4",
+  "assets": {
+    "sherpaHeader": {
+      "url": "https://raw.githubusercontent.com/k2-fsa/sherpa-onnx/v1.13.4/sherpa-onnx/c-api/c-api.h",
+      "sha256": "587e1039cc4ee242169494f3c0ba5baecc22482341168d88d57db965e1e77fa9",
+      "fileName": "c-api.h"
+    },
+    "sentencepiece": {
+      "url": "https://github.com/google/sentencepiece/releases/download/v0.2.1/sentencepiece-0.2.1.tar.gz",
+      "sha256": "8138cec27c2f2282f4a34d9a016e3374cd40e5c6e9cb335063db66a0a3b71fad",
+      "fileName": "sentencepiece-0.2.1.tar.gz",
+      "root": "sentencepiece-0.2.1/sentencepiece"
+    },
+    "nlohmannJson": {
+      "url": "https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz",
+      "sha256": "42f6e95cad6ec532fd372391373363b62a14af6d771056dbfc86160e6dfff7aa",
+      "fileName": "nlohmann-json-3.12.0.tar.xz",
+      "root": "json"
+    },
+    "keywordModel": {
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/kws-models/sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01.tar.bz2",
+      "sha256": "f170013b4716e41b62b9bfd809687c207cef798ef9bc6534d524e17af9b6561a",
+      "fileName": "sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01.tar.bz2",
+      "root": "sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01",
+      "modelId": "sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01",
+      "files": {
+        "encoder": "encoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx",
+        "decoder": "decoder-epoch-12-avg-2-chunk-16-left-64.onnx",
+        "joiner": "joiner-epoch-12-avg-2-chunk-16-left-64.int8.onnx",
+        "bpeModel": "bpe.model",
+        "tokens": "tokens.txt",
+        "notice": "README.md",
+        "positiveFixture": "test_wavs/0.wav"
+      }
+    },
+    "vadModel": {
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx",
+      "sha256": "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6",
+      "fileName": "silero_vad.onnx"
+    },
+    "licenses": {
+      "sherpaOnnx": {
+        "url": "https://raw.githubusercontent.com/k2-fsa/sherpa-onnx/v1.13.4/LICENSE",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "fileName": "sherpa-onnx-APACHE-2.0.txt"
+      },
+      "onnxRuntime": {
+        "url": "https://raw.githubusercontent.com/microsoft/onnxruntime/v1.27.0/LICENSE",
+        "sha256": "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c",
+        "fileName": "onnxruntime-MIT.txt"
+      },
+      "sileroVad": {
+        "url": "https://raw.githubusercontent.com/snakers4/silero-vad/76e3dc408eb2a5c655c34e230d2d5459b4439daa/LICENSE",
+        "sha256": "2e63e9a38b6e8fc0c7bc37ce174caca1862870856c6daf5697cfb785e925520b",
+        "fileName": "silero-vad-MIT.txt"
+      }
+    }
+  },
+  "runtimes": {
+    "darwin-x64": {
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.4/sherpa-onnx-v1.13.4-osx-universal2-shared-no-tts.tar.bz2",
+      "sha256": "6d3bd6855e8c5723d728ece9ce02c844b67fdd044390ea9f01cb90a90e296a58",
+      "fileName": "sherpa-onnx-v1.13.4-osx-universal2-shared-no-tts.tar.bz2",
+      "root": "sherpa-onnx-v1.13.4-osx-universal2-shared-no-tts",
+      "cmakeArch": "x86_64",
+      "runtimeLibraries": [
+        "libsherpa-onnx-c-api.dylib",
+        "libonnxruntime.1.27.0.dylib"
+      ]
+    },
+    "darwin-arm64": {
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.4/sherpa-onnx-v1.13.4-osx-universal2-shared-no-tts.tar.bz2",
+      "sha256": "6d3bd6855e8c5723d728ece9ce02c844b67fdd044390ea9f01cb90a90e296a58",
+      "fileName": "sherpa-onnx-v1.13.4-osx-universal2-shared-no-tts.tar.bz2",
+      "root": "sherpa-onnx-v1.13.4-osx-universal2-shared-no-tts",
+      "cmakeArch": "arm64",
+      "runtimeLibraries": [
+        "libsherpa-onnx-c-api.dylib",
+        "libonnxruntime.1.27.0.dylib"
+      ]
+    },
+    "linux-x64": {
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.4/sherpa-onnx-v1.13.4-linux-x64-shared-no-tts-lib.tar.bz2",
+      "sha256": "8a2c6d5f8d04e651c90e71ba3ee8b08dedb2b741ff5f316e12aa629423f91c9f",
+      "fileName": "sherpa-onnx-v1.13.4-linux-x64-shared-no-tts-lib.tar.bz2",
+      "root": "sherpa-onnx-v1.13.4-linux-x64-shared-no-tts-lib",
+      "runtimeLibraries": [
+        "libsherpa-onnx-c-api.so",
+        "libonnxruntime.so"
+      ]
+    },
+    "linux-arm64": {
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.4/sherpa-onnx-v1.13.4-linux-aarch64-shared-cpu-lib.tar.bz2",
+      "sha256": "8993fd2ae4c435345f270231ae9af48def799638c8b1b06c0e48512e47c39e4d",
+      "fileName": "sherpa-onnx-v1.13.4-linux-aarch64-shared-cpu-lib.tar.bz2",
+      "root": "sherpa-onnx-v1.13.4-linux-aarch64-shared-cpu-lib",
+      "runtimeLibraries": [
+        "libsherpa-onnx-c-api.so",
+        "libonnxruntime.so"
+      ]
+    },
+    "win32-x64": {
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.4/sherpa-onnx-v1.13.4-win-x64-shared-MD-MinSizeRel-no-tts-lib.tar.bz2",
+      "sha256": "efb0b86d319299fffa733e08132488eccc8a51970b511e8abb2a81b09adb6698",
+      "fileName": "sherpa-onnx-v1.13.4-win-x64-shared-MD-MinSizeRel-no-tts-lib.tar.bz2",
+      "root": "sherpa-onnx-v1.13.4-win-x64-shared-MD-MinSizeRel-no-tts-lib",
+      "cmakeArch": "x64",
+      "runtimeLibraries": [
+        "sherpa-onnx-c-api.dll",
+        "onnxruntime.dll",
+        "onnxruntime_providers_shared.dll"
+      ]
+    },
+    "win32-arm64": {
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.4/sherpa-onnx-v1.13.4-win-arm64-shared-MD-MinSizeRel-no-tts-lib.tar.bz2",
+      "sha256": "14cf8259bbf2f2a2647d404e481bdbaf10f6ef61e23e13d972fbaea91cfa5891",
+      "fileName": "sherpa-onnx-v1.13.4-win-arm64-shared-MD-MinSizeRel-no-tts-lib.tar.bz2",
+      "root": "sherpa-onnx-v1.13.4-win-arm64-shared-MD-MinSizeRel-no-tts-lib",
+      "cmakeArch": "ARM64",
+      "runtimeLibraries": [
+        "sherpa-onnx-c-api.dll",
+        "onnxruntime.dll",
+        "onnxruntime_providers_shared.dll"
+      ]
+    }
+  }
+}

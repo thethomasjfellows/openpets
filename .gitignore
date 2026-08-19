@@ -9,6 +9,7 @@ apps/desktop/dist-electron
 *.tsbuildinfo
 .DS_Store
 local/
+prompt-exports/
 .slim/deepwork/
 opencode.json
 .slim/worktrees/
@@ -17,4 +18,3 @@ opencode.json
 # BEGIN oh-my-opencode-slim clonedeps
 .slim/clonedeps/repos/
 # END oh-my-opencode-slim clonedeps
-

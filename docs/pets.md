@@ -37,7 +37,9 @@ Two distinct window roles, two controllers:
 - **Default pet** (`default-pet-controller.ts`) — the always-on companion shown
   when enabled. Persistent. Remembers its position per connected monitor and
   clamps it back into the visible work area after display changes. Shows
-  transient reactions and status badges. Not lease-bound.
+  transient reactions and status badges. Not lease-bound. **Reset Pet Position**
+  is a recovery action: it restores a hidden or missing default pet at the safe
+  initial position and turns show-on-launch back on.
 - **Agent pets** (`agent-pet-controller.ts`) — shown on explicit agent request,
   routed by a **lease**. The first lease opens the window; the last lease
   released closes it. This lets several agents each get their own pet without
@@ -49,6 +51,12 @@ Two distinct window roles, two controllers:
 
 Both are created by `pet-window.ts` as transparent, frameless, always-on-top
 windows, driven through `pet-preload.cjs` for drag and click-through behavior.
+Pet renderers disable background throttling because they are normally not the
+foreground app; animations, voice playback, and playback-completion events must
+continue promptly while the user works elsewhere. The desktop also permits
+programmatic autoplay for its hardened internal windows because companion and
+plugin speech originates from trusted host events rather than a click inside the
+transparent pet window; plugin speech/audio permissions remain host-enforced.
 
 While a pet is click-through it only learns that the cursor is over it through
 *forwarded* mouse events (`setIgnoreMouseEvents(true, { forward: true })`), which
@@ -80,8 +88,113 @@ reaction into something visible:
    shows speech bubbles, alert indicators, pinned HUDs, and status badges as
    requested.
 
+Users may enable **Read speech bubbles aloud** in Control Center → Settings →
+General. The host then narrates newly presented plain-text transient bubbles through
+the provider selected in Settings → Abilities → Speak, with optional per-pet overrides and
+provider/voice fallbacks. System Voice uses the pet renderer's
+`speechSynthesis`; remote and local providers use a separate voice-audio channel.
+Text is trimmed and bounded before synthesis. Queued speech keeps the provider,
+voice, and model selection it had when accepted; selecting another provider
+without an explicit voice or model uses that provider's defaults. Interrupting
+or stopping speech settles each renderer playback request exactly once.
+This covers the default pet,
+leased agent pets, local IPC `pet.say`, and plugin `ctx.pet.speak()` because they
+share the pet-window presentation path. Plain-text plugin bubbles may also be
+narrated; pinned HUDs, markdown-only bubbles, and interactive controls are not. Quiet hours mute the
+automatic voice, and repeated render refreshes of the same visible text are
+deduplicated. Speech is best-effort and never blocks or replaces the visual
+bubble.
+
 This separation — mapping vs message vs render — is deliberate: agents and
 plugins speak in *reactions*, and the host owns *how* those look and sound.
+
+## Companion conversations
+
+Companion Conversations is the host-owned, opt-in identity layer for installed
+pets. It is not an OpenAI/Codex agent profile and it is not the coding-agent
+reaction stream. Each installed pet can have a seven-field character overlay:
+visible name, species, origin, appearance, personality, quirks, and life story.
+The immutable asset ID and artwork remain unchanged. The shared user profile is
+name, preferred form of address, and freeform About You background. Removing a
+pet also removes that pet's character overlay, recent memory, and live turn.
+
+Pet Details edits a local draft and requires an explicit Save. **Fill Missing
+Details** asks the selected AI Brain to fill only blank fields;
+**Reimagine Character** replaces all seven fields, including the visible name.
+Both use only the original package name/description, the editable draft, and
+optional imported `.txt`/`.md` source notes—never pet image analysis. Imported
+source notes are visible and transient, generated output is strictly validated
+as structured JSON, and closing Pet Details warns before discarding an unsaved
+draft. **Reset to original** restores an original-derived draft without touching
+the asset ID, sprites, or installed files.
+The generator shows whether the selected AI Brain is ready, explains both
+choices before they run, and displays a live progress state while creating the
+draft.
+
+The first **Enable Companion** action is the disclosure boundary. It atomically
+enables roughly 24-hour recent memory and gentle proactive check-ins at
+**Sometimes**. A plugin may contribute only when it is enabled and its sensitive
+`companion:context` permission was approved; there is no second global context
+toggle. Listening and Vision remain separate choices. Vision uses dedicated
+fresh consent state rather than the former Companion screen placeholder, so
+advance screen consent is never retained. Ambient pre-wake audio is not
+recorded, persisted, transcribed, or sent to a provider.
+
+The Control Center does not expose typed companion chat or push-to-talk.
+Conversation is voice-first and will enter `CompanionOrchestrator` only after
+the local wake pipeline produces one bounded transcript. The orchestrator then
+builds one bounded prompt from the default-pet identity, explicit profile,
+local time/activity state, recent memory, consented plugin facts, and bounded
+summary-only Vision context. It calls
+either:
+
+- **Codex CLI** — becomes selectable only after the first-class Codex
+  integration is Connected, validates the installed `codex exec --json`/resume
+  contract, maintains a cancellable session per pet, and retries a stale session
+  once statelessly; or
+- **OpenPets AI provider** — uses the host's Anthropic, OpenAI, or Ollama-
+  compatible provider configuration and explicit health probe.
+
+Provider selection changes generation transport only. Personality, profile,
+memory retention, plugin consent, check-in policy, bubble rendering, and voice
+selection stay owned by OpenPets. A provider response is committed as recent
+memory only after the pet bubble is successfully displayed. User turns are
+committed when accepted; failed persistence is logged without losing the live
+turn. Memory rolls for 24 hours and is additionally capped at 200 total entries,
+60 entries per pet, 2,000 characters per entry, 512 KiB on disk, and a smaller
+recent subset in each prompt. The user can clear one pet's memory at any time.
+
+Check-ins apply to the visible, unpaused default pet. Host candidates come from
+morning/midday/evening timing; enabled, approved plugins
+may add expiring opportunities, and recent opt-in Vision summaries may add
+privacy-constrained context-aware opportunities. Quiet hours and any active
+listening, thinking, or speaking suppress them. Rarely/Sometimes/Often are
+maximum frequencies (1/3/5 per local day, with 6-hour/3-hour/90-minute spacing), not notification schedules.
+The pet can also change its reaction once per local day part—bright in the
+morning, hungry around midday, content in the afternoon, winding down in the
+evening, sleepy at night—without starting a conversation.
+
+Wake-word health comes from validating the installed current-platform Sherpa
+bundle. Settings → Abilities contains friendly **Listen**, **Speak**, and
+**Vision** sections. Listen stores the customizable phrase and stays off until
+the user explicitly enables it. While enabled, one shared 16 kHz mono capture
+feeds local KWS/VAD only; the system microphone indicator stays visible, and
+pre-wake audio is neither recorded, transcribed, persisted, nor sent to a
+provider. After the pet speaks, the next turn requires the phrase again. A
+missing, wrong-platform, or damaged bundle reports unavailable and cannot arm
+capture.
+
+Vision is a host-owned, default-off ability with one switch. When enabled and
+the default pet is visible and unpaused, it occasionally captures the pet's
+display and sends that bounded image to the configured host-AI provider for a
+high-level summary. Screenshots and summaries are stored locally under the
+OpenPets data directory and both expire on a rolling 24-hour cycle, with
+additional count and byte caps. Settings show capture/provider health, the exact
+storage location, and an explicit warning that sensitive information may still
+be captured or used as context. The tray and default-pet menu can pause new
+capture for 30/60/90 minutes or resume it. Pausing keeps existing context only
+until normal expiry; disabling aborts capture and deletes retained Vision data.
+Screenpipe remains a plugin rather than the built-in Vision implementation.
 
 ## Motion
 
@@ -101,7 +214,9 @@ Plugin-driven movement (`plugin-sdk-routes.ts` → `plugin-pet-registry.ts`) fee
 target vectors and physics overrides through the engine's public API
 (`motionMoveTo`, `motionSetPhysics`, `motionSetFollowCursor`). The engine is the
 **sole continuous position writer**; all per-pet step loops were eliminated to
-prevent jitter from competing writers. Sub-pixel fractional accumulators
+prevent jitter from competing writers. An accepted target move remains shared-
+ticker work until it finishes or is superseded, even if the follow or physics
+mode that delegated it is disabled in the meantime. Sub-pixel fractional accumulators
 (`fracX` / `fracY` in `MotionState`) ensure smooth movement at any tick rate.
 See [plugins.md](plugins.md) and [sdk.md](sdk.md) for the plugin side.
 
@@ -230,6 +345,10 @@ images silently fall back to the default pet. This is the single most common
 |---------------------|----------|
 | How a reaction looks | `reaction-animation-mapping.ts` |
 | What a pet says | `reaction-messages.ts` + `i18n/reactions/` |
+| Per-pet conversational identity | `companion-settings.ts`, `companion-context.ts` |
+| Recent conversation memory | `companion-memory.ts` |
+| Wake conversation and providers | `voice-wake-*.ts`, `companion-orchestrator.ts`, `companion-target-*.ts` |
+| Time expression / proactive check-ins | `companion-time.ts`, `companion-proactivity.ts`, `companion-proactive-service.ts` |
 | Window behavior (drag, click-through) | `pet-window.ts`, `pet-preload.cjs` |
 | Default vs agent visibility | `default-pet-controller.ts`, `agent-pet-controller.ts` |
 | Installing / extracting | `pet-installation.ts`, `zip-safety.ts` |

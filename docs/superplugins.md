@@ -28,6 +28,44 @@ commands), not by bolting bespoke windows onto the pet. Concretely:
 - **Appliance, not platform knob.** Prefer many small, enable-and-go plugins over
   one big configurable one. (This is a standing product preference — a single
   plugin should explain itself by name and do one thing well.)
+- **Bounded utility, not general agent access.** Everyday requests such as
+  checking a calendar, setting a reminder, or starting a focus session belong
+  to a domain plugin with explicit permissions and validated actions. Companion
+  does not inherit Codex skills, MCP servers, shell access, or arbitrary tools.
+  See the canonical [Companion capability boundary](architecture.md#companion-capability-boundary).
+
+### Companion contribution strategy
+
+OpenPets core owns the conversational pet: per-pet character profile, the user's
+minimal explicit profile, roughly 24 hours of recent memory, provider choice,
+speech, and the final decision to initiate a check-in. SuperPlugins remain
+modular domain experts. With approved `companion:context` permission and while enabled they
+may offer expiring facts or opportunities, but they never write the pet's final
+line, force a check-in, select a provider, or add durable/core memory.
+
+This keeps habits, reminders, focus, calendars, and future screen awareness out
+of the core app while still letting the pet feel informed. The plugin's own
+enable state and approved sensitive permission are the single context consent
+surface. A future Screenpipe plugin may contribute bounded, expiring observations through
+`companion:context` after that approval, but does not inherit the
+user's Codex MCP servers or become a callable Codex tool merely because Codex is
+the selected Brain.
+
+The intended spoken-utility direction follows the same rule: the host may route
+a clear user request to a declared plugin action, the plugin performs only its
+approved domain operation, and the host lets the pet present the bounded result
+in its own personality. The conversation model is not given a general toolbox.
+The current SDK has plugin commands and Companion context contributions; a
+future spoken-intent/action contract remains design work and must keep
+permission approval, confirmation for consequential writes, input validation,
+and host-owned final wording explicit.
+
+Focus Buddy is the pilot for this contract. An active, unpaused focus session
+offers one low-urgency mid-session opportunity after a delay, with session-
+scoped expiry/dedupe/cooldown. Pausing or ending removes it. The host still
+applies quiet hours, Rarely/Sometimes/Often policy, provider readiness, current
+activity, and original-wording generation, so “start a focus timer” never means
+“guarantee an interruption.”
 
 ## Right-click action strategy
 
@@ -41,13 +79,13 @@ in-the-moment interactions (snooze, done, feed).
 ## Official plugin lineup
 
 Official plugins live in `plugins/official/` and are the reviewed catalog set.
-Current lineup (verified 2026-07-10 against the folder + manifests):
+Current lineup (verified 2026-07-17 against the folder + manifests):
 
 | Plugin id | What it is |
 |-----------|------------|
 | `openpets.reminders` | Quick reminders with due/missed alerts, snooze/done, status, optional notify/sound |
 | `openpets.virtual-pet` | Tamagotchi-style state machine (hunger/energy/happiness/affection), pinned HUD, click handling |
-| `openpets.focus-buddy` | Focus-session timers with status and completion/break feedback |
+| `openpets.focus-buddy` | Focus-session timers with status/completion feedback and a consented low-urgency mid-session Companion opportunity |
 | `openpets.water-reminder` | Hydration reminder loop with configurable cadence |
 | `openpets.day-routine` | Morning/evening daily check-ins |
 | `openpets.mood-check-in` | Mood logging/check-in companion |
@@ -69,6 +107,8 @@ Current community lineup:
 
 | Plugin id | What it is |
 |-----------|------------|
+| `openpets.higgsfield-watch` | Watches Higgsfield generation jobs and lets the pet report status changes |
+| `openpets.spotify-buddy` | Connects to Spotify for playback-aware pet reactions and commands |
 | `openpets.walkabout` | Makes the pet roam the screen, follow the cursor, or patrol back and forth |
 
 > Drift note: `web/docs/plugin-publishing.md` still lists an **older** lineup

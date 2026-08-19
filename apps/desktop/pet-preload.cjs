@@ -13,6 +13,8 @@ const dismissBubble = (event) => {
 
   const bubble = target.closest(".bubble");
   if (!bubble) return;
+  const closeButton = target.closest("[data-bubble-close]");
+  if (bubble.dataset.closeOnly === "true" && !closeButton) return;
 
   const dismissToken = bubble.dataset.dismissToken;
   if (!dismissToken) return;
@@ -269,6 +271,9 @@ const namedSoundRecipes = {
   tick: [{ freq: 1000, type: "square", start: 0, duration: 0.03 }],
   success: [{ freq: 587.33, type: "sine", start: 0, duration: 0.14 }, { freq: 880, type: "sine", start: 0.14, duration: 0.24 }],
   error: [{ freq: 311.13, type: "sine", start: 0, duration: 0.18 }, { freq: 233.08, type: "sine", start: 0.2, duration: 0.28 }],
+  "voice-start": [{ freq: 659.25, type: "sine", start: 0, duration: 0.08 }, { freq: 880, type: "sine", start: 0.08, duration: 0.12 }],
+  "voice-stop": [{ freq: 880, type: "sine", start: 0, duration: 0.08 }, { freq: 659.25, type: "sine", start: 0.08, duration: 0.12 }],
+  "voice-wake": [{ freq: 523.25, type: "sine", start: 0, duration: 0.08 }, { freq: 783.99, type: "sine", start: 0.08, duration: 0.16 }],
 };
 
 ipcRenderer.on("openpets:play-audio", (_event, payload) => {
@@ -320,6 +325,270 @@ ipcRenderer.on("openpets:stop-audio", () => {
   activeAudioNodes = [];
   for (const element of activeAudioElements) { try { element.pause(); } catch { /* noop */ } }
   activeAudioElements = [];
+});
+
+// --- Host voice output (isolated from plugin audio) --------------------------
+
+let activeVoiceAudioEntries = [];
+let activeVoiceUtteranceEntries = [];
+
+const parseVoiceCaption = (value) => {
+  if (!value || typeof value.text !== "string" || !Array.isArray(value.segments)) return null;
+  const text = value.text.trim().slice(0, 4000);
+  if (!text) return null;
+  let previousEnd = 0;
+  const segments = [];
+  for (const segment of value.segments.slice(0, 1000)) {
+    const endIndex = Number(segment && segment.endIndex);
+    const weight = Number(segment && segment.weight);
+    if (!Number.isInteger(endIndex) || endIndex <= previousEnd || endIndex > text.length || !Number.isFinite(weight) || weight <= 0 || weight > 4) return null;
+    segments.push({ endIndex, weight });
+    previousEnd = endIndex;
+  }
+  if (segments.length === 0) return null;
+  const totalWeight = segments.reduce((sum, segment) => sum + segment.weight, 0);
+  return { text, segments, totalWeight };
+};
+
+const createVoiceCaptionController = (rawCaption) => {
+  const caption = parseVoiceCaption(rawCaption);
+  if (!caption) return null;
+  let bubble = null;
+  let textElement = null;
+  let completed = false;
+  const ensureBubble = () => {
+    if (bubble && bubble.isConnected && textElement && textElement.isConnected) return;
+    const stage = document.querySelector(".stage");
+    if (!stage) return;
+    bubble = stage.querySelector(":scope > .bubble:not(.is-plugin):not(.is-pinned)");
+    if (!bubble) {
+      bubble = document.createElement("div");
+      stage.insertBefore(bubble, stage.querySelector(".pet-hitbox"));
+    }
+    const lengthClass = caption.text.length > 95 ? " is-very-long-message" : caption.text.length > 56 ? " is-long-message" : "";
+    bubble.className = `bubble is-message is-speaking is-conversation has-close${lengthClass}`;
+    bubble.setAttribute("role", "status");
+    bubble.setAttribute("aria-live", "polite");
+    bubble.setAttribute("data-close-only", "true");
+    bubble.replaceChildren();
+    const closeButton = document.createElement("button");
+    closeButton.type = "button";
+    closeButton.className = "bubble-close";
+    closeButton.setAttribute("data-bubble-close", "");
+    closeButton.setAttribute("aria-label", "Stop speaking");
+    closeButton.textContent = "×";
+    const header = document.createElement("div");
+    header.className = "bubble-header";
+    const statusIcon = document.createElement("span");
+    statusIcon.className = "bubble-status-icon";
+    statusIcon.setAttribute("data-icon", "");
+    statusIcon.setAttribute("aria-hidden", "true");
+    const statusLabel = document.createElement("span");
+    statusLabel.className = "bubble-status-label";
+    statusLabel.textContent = "Speaking";
+    header.append(statusIcon, statusLabel);
+    const divider = document.createElement("div");
+    divider.className = "bubble-divider";
+    divider.setAttribute("aria-hidden", "true");
+    const body = document.createElement("div");
+    body.className = "bubble-body";
+    textElement = document.createElement("span");
+    textElement.className = "bubble-text";
+    body.appendChild(textElement);
+    bubble.append(closeButton, header, divider, body);
+  };
+  const revealIndex = (endIndex) => {
+    ensureBubble();
+    if (textElement) textElement.textContent = caption.text.slice(0, Math.max(0, Math.min(caption.text.length, endIndex))).trimEnd();
+  };
+  const revealRatio = (ratio) => {
+    const target = Math.max(0, Math.min(1, ratio)) * caption.totalWeight;
+    let cumulative = 0;
+    let endIndex = caption.segments[0].endIndex;
+    for (const segment of caption.segments) {
+      cumulative += segment.weight;
+      endIndex = segment.endIndex;
+      if (cumulative >= target) break;
+    }
+    revealIndex(endIndex);
+  };
+  return {
+    start: () => revealIndex(caption.segments[0].endIndex),
+    revealRatio,
+    revealBoundary: (charIndex) => {
+      const current = caption.segments.find((segment) => segment.endIndex > charIndex) ?? caption.segments[caption.segments.length - 1];
+      revealIndex(current.endIndex);
+    },
+    complete: () => { completed = true; revealIndex(caption.text.length); },
+    cancel: () => {
+      if (!completed && bubble?.isConnected) bubble.remove();
+      bubble = null;
+      textElement = null;
+    },
+    totalWeight: caption.totalWeight,
+  };
+};
+
+const createVoicePlaybackFinish = (requestId) => {
+  let finished = false;
+  return (ok) => {
+    if (finished) return false;
+    finished = true;
+    if (requestId) ipcRenderer.send("openpets:voice-playback-finished", { requestId, ok });
+    return true;
+  };
+};
+
+ipcRenderer.on("openpets:voice-play-audio", (_event, payload) => {
+  const requestId = payload && typeof payload.requestId === "string" ? payload.requestId : null;
+  const finish = createVoicePlaybackFinish(requestId);
+  let entry = null;
+  const caption = createVoiceCaptionController(payload?.caption);
+  const settle = (ok) => {
+    if (!finish(ok)) return;
+    if (!ok) caption?.cancel();
+    if (entry) activeVoiceAudioEntries = activeVoiceAudioEntries.filter((candidate) => candidate !== entry);
+  };
+  try {
+    if (!requestId || typeof payload.dataUrl !== "string" || !payload.dataUrl.startsWith("data:audio/")) { settle(false); return; }
+    const element = new Audio(payload.dataUrl);
+    element.volume = Math.min(1, Math.max(0, Number(payload.volume) || 1));
+    entry = { requestId, element, finish: settle, caption, animationFrame: null };
+    activeVoiceAudioEntries.push(entry);
+    element.addEventListener("loadedmetadata", () => audioLog("debug", "voice metadata ready", {
+      durationMs: Number.isFinite(element.duration) ? Math.round(element.duration * 1000) : undefined,
+    }), { once: true });
+    element.addEventListener("ended", () => {
+      if (entry?.animationFrame !== null) cancelAnimationFrame(entry.animationFrame);
+      caption?.complete();
+      audioLog("debug", "voice playback ended");
+      settle(true);
+    }, { once: true });
+    element.addEventListener("error", () => { audioLog("warn", "voice playback failed", { mediaErrorCode: element.error?.code }); settle(false); }, { once: true });
+    void element.play().then(() => {
+      ipcRenderer.send("openpets:voice-playback-started", { requestId });
+      caption?.start();
+      const updateCaption = () => {
+        if (!entry || element.paused || element.ended) return;
+        if (caption && Number.isFinite(element.duration) && element.duration > 0) caption.revealRatio(element.currentTime / element.duration);
+        entry.animationFrame = requestAnimationFrame(updateCaption);
+      };
+      updateCaption();
+    }).catch((error) => {
+        audioLog("warn", "voice playback start failed", { reason: error instanceof Error ? error.name : "unknown" });
+        settle(false);
+      });
+  } catch { settle(false); }
+});
+
+ipcRenderer.on("openpets:voice-system-speak", (_event, payload) => {
+  const requestId = payload && typeof payload.requestId === "string" ? payload.requestId : null;
+  const finish = createVoicePlaybackFinish(requestId);
+  let entry = null;
+  const caption = createVoiceCaptionController(payload?.caption);
+  const settle = (ok) => {
+    if (!finish(ok)) return;
+    if (entry?.captionTimer) clearInterval(entry.captionTimer);
+    if (!ok) caption?.cancel();
+    if (entry) activeVoiceUtteranceEntries = activeVoiceUtteranceEntries.filter((candidate) => candidate !== entry);
+  };
+  try {
+    if (!requestId || typeof payload.text !== "string" || !window.speechSynthesis) { settle(false); return; }
+    const utterance = new SpeechSynthesisUtterance(payload.text.slice(0, 4000));
+    if (typeof payload.rate === "number" && payload.rate >= 0.5 && payload.rate <= 2) utterance.rate = payload.rate;
+    if (typeof payload.voice === "string" && payload.voice) {
+      const match = window.speechSynthesis.getVoices().find((voice) => voice.name === payload.voice || voice.voiceURI === payload.voice || voice.lang === payload.voice);
+      if (match) utterance.voice = match;
+    }
+    entry = { requestId, utterance, finish: settle, captionTimer: null, boundarySeen: false };
+    activeVoiceUtteranceEntries.push(entry);
+    utterance.addEventListener("start", () => {
+      ipcRenderer.send("openpets:voice-playback-started", { requestId });
+      caption?.start();
+      const startedAt = performance.now();
+      const rate = typeof utterance.rate === "number" && utterance.rate > 0 ? utterance.rate : 1;
+      if (caption) entry.captionTimer = setInterval(() => {
+        if (entry?.boundarySeen) return;
+        caption.revealRatio((performance.now() - startedAt) / Math.max(250, caption.totalWeight * 260 / rate));
+      }, 60);
+    }, { once: true });
+    utterance.addEventListener("boundary", (event) => {
+      if (entry) entry.boundarySeen = true;
+      caption?.revealBoundary(Number(event.charIndex) || 0);
+    });
+    utterance.addEventListener("end", () => { caption?.complete(); settle(true); }, { once: true });
+    utterance.addEventListener("error", () => settle(false), { once: true });
+    window.speechSynthesis.speak(utterance);
+  } catch { settle(false); }
+});
+
+ipcRenderer.on("openpets:voice-stop", () => {
+  const audioEntries = activeVoiceAudioEntries;
+  activeVoiceAudioEntries = [];
+  for (const entry of audioEntries) {
+    if (entry.animationFrame !== null) cancelAnimationFrame(entry.animationFrame);
+    entry.caption?.cancel();
+    entry.finish(false);
+    try { entry.element.pause(); } catch { /* noop */ }
+  }
+  const utteranceEntries = activeVoiceUtteranceEntries;
+  activeVoiceUtteranceEntries = [];
+  // Settle cancellation before invoking browser APIs: speechSynthesis.cancel()
+  // may synchronously emit an end/error event on some platforms.
+  for (const entry of utteranceEntries) {
+    if (entry.captionTimer) clearInterval(entry.captionTimer);
+    entry.finish(false);
+  }
+  try { if (utteranceEntries.length > 0 && window.speechSynthesis) window.speechSynthesis.cancel(); } catch { /* noop */ }
+});
+
+ipcRenderer.on("openpets:voice-system-list-voices", (_event, payload) => {
+  const requestId = payload && typeof payload.requestId === "string" ? payload.requestId : null;
+  if (!requestId) return;
+  const synthesis = window.speechSynthesis;
+  let sent = false;
+  let timer = null;
+  let onVoicesChanged = null;
+  const send = () => {
+    if (sent) return;
+    sent = true;
+    if (timer !== null) clearTimeout(timer);
+    if (synthesis && onVoicesChanged) synthesis.removeEventListener("voiceschanged", onVoicesChanged);
+    const discovered = synthesis ? synthesis.getVoices().map((voice) => ({ id: voice.voiceURI || voice.name, label: voice.name, language: voice.lang })) : [];
+    const voices = [...new Map(discovered.map((voice) => [voice.id, voice])).values()]
+      .sort((a, b) => String(a.language).localeCompare(String(b.language)) || a.label.localeCompare(b.label))
+      .slice(0, 300);
+    ipcRenderer.send("openpets:voice-system-voices-result", { requestId, voices });
+  };
+  if (synthesis && synthesis.getVoices().length === 0) {
+    onVoicesChanged = send;
+    timer = setTimeout(send, 500);
+    synthesis.addEventListener("voiceschanged", onVoicesChanged, { once: true });
+  } else send();
+});
+
+ipcRenderer.on("openpets:voice-listening-state", (_event, state) => {
+  const allowed = ["idle", "listening", "transcribing", "thinking"];
+  document.documentElement.dataset.voiceState = allowed.includes(state) ? state : "idle";
+});
+
+ipcRenderer.on("openpets:voice-cue", (_event, payload) => {
+  const recipe = payload && namedSoundRecipes[payload.cue];
+  if (!recipe) return;
+  const ctxAudio = getAudioContext();
+  const now = ctxAudio.currentTime;
+  for (const note of recipe) {
+    const osc = ctxAudio.createOscillator();
+    const gain = ctxAudio.createGain();
+    osc.type = note.type;
+    osc.frequency.value = note.freq;
+    gain.gain.setValueAtTime(0, now + note.start);
+    gain.gain.linearRampToValueAtTime(0.22, now + note.start + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + note.start + note.duration);
+    osc.connect(gain).connect(ctxAudio.destination);
+    osc.start(now + note.start);
+    osc.stop(now + note.start + note.duration + 0.04);
+  }
 });
 
 // --- Plugin TTS ---------------------------------------------------------------

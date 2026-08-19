@@ -12,6 +12,7 @@ import { PetBubbleArbiter, type ActiveBubble, type PetBubbleSink } from "./plugi
 import { publishPluginPetEvent } from "./plugin-events-source.js";
 import { reclampAgentPetWindows } from "./agent-pet-controller.js";
 import { reclampPluginPetWindows } from "./plugin-pet-registry.js";
+import { isDefaultPetConversationPresentationActive } from "./pet-presentation-ownership.js";
 
 let defaultPetWindow: BrowserWindow | null = null;
 let paused = false;
@@ -21,6 +22,7 @@ let transientDisplayTimeout: NodeJS.Timeout | null = null;
 let transientAnimationTimeout: NodeJS.Timeout | null = null;
 let statusBadgeTimeout: NodeJS.Timeout | null = null;
 let displayGeneration = 0;
+let transientDismissHandler: (() => void) | null = null;
 const busyStatusBadgeMs = 120_000;
 const maxPluginMoveDistance = 160;
 const minPluginMoveDurationMs = 250;
@@ -30,6 +32,13 @@ let movementInProgress = false;
 export type PetMoveOptions = { readonly x: number; readonly y: number; readonly durationMs?: number };
 export type PetWanderOptions = { readonly distance?: number; readonly durationMs?: number };
 export type PetReactionOptions = { readonly showMessage?: boolean };
+export type PetSayOptions = {
+  readonly suppressNarration?: boolean;
+  readonly durationMs?: number;
+  readonly voiceIndicator?: "listening" | "speaking";
+  readonly showCloseButton?: boolean;
+  readonly onDismiss?: () => void;
+};
 
 // Plugin bubble slots (SDK v3): the arbiter decides what each slot shows; the
 // sink merges its decisions into the default pet render.
@@ -151,19 +160,26 @@ export function applyExternalPetReaction(reaction: OpenPetsReaction, options: Pe
   if (paused) {
     return { shown: false, reason: "paused" };
   }
+  if (isDefaultPetConversationPresentationActive()) {
+    debug("pet.default", "external reaction suppressed", { reaction, reason: "conversation-active" });
+    return { shown: false, reason: "conversation-active" };
+  }
 
   setTransientDisplay({ reaction, ...(options.showMessage === false ? { suppressReactionMessage: true } : {}) });
   showDefaultPetForExternalEvent();
   return { shown: isDefaultPetVisible() };
 }
 
-export function applyExternalPetSay(message: string, reaction?: OpenPetsReaction): { readonly shown: boolean; readonly reason?: string } {
+export function applyExternalPetSay(message: string, reaction?: OpenPetsReaction, options: PetSayOptions = {}): { readonly shown: boolean; readonly reason?: string } {
   if (paused) {
     return { shown: false, reason: "paused" };
   }
 
   if (!reaction) clearStatusBadge();
-  setTransientDisplay({ message, reaction });
+  const displayDurationMs = options.durationMs === undefined
+    ? undefined
+    : Math.min(30_000, Math.max(1_000, Math.round(options.durationMs)));
+  setTransientDisplay({ message, reaction, displayDurationMs, ...(options.suppressNarration ? { suppressNarration: true } : {}), ...(options.voiceIndicator ? { voiceIndicator: options.voiceIndicator } : {}), ...(options.showCloseButton ? { showCloseButton: true } : {}) }, options.onDismiss);
   showDefaultPetForExternalEvent();
   return { shown: isDefaultPetVisible() };
 }
@@ -275,10 +291,12 @@ function handleBubbleDismissed(dismissToken: string): void {
       debug("pet.default", "media bubble click open failed", { error: error instanceof Error ? error.message : String(error) });
     });
   }
+  const onDismiss = transientDismissHandler;
   clearDefaultPetDisplayTimers();
   if (defaultPetWindow && !defaultPetWindow.isDestroyed()) {
     void loadDefaultPetContent(defaultPetWindow, paused, null, null, undefined, getDefaultPetPluginBubbles());
   }
+  try { onDismiss?.(); } catch { /* host dismissal callbacks are isolated */ }
 }
 
 function getOrCreateDefaultPetWindow(): BrowserWindow {
@@ -316,9 +334,10 @@ function getOrCreateDefaultPetWindow(): BrowserWindow {
   return defaultPetWindow;
 }
 
-function setTransientDisplay(display: PetTransientDisplay): void {
+function setTransientDisplay(display: PetTransientDisplay, onDismiss?: () => void): void {
   debug("pet.default", "transient display set", { reaction: display.reaction, hasMessage: Boolean(display.message), hasReactionMessage: Boolean(display.reactionMessage) });
   displayGeneration++;
+  transientDismissHandler = onDismiss ?? null;
   transientDisplay = mergePetTransientDisplay(transientDisplay, { ...display, dismissToken: String(displayGeneration) });
   if (display.reaction) setStatusBadge(display.reaction);
 
@@ -343,6 +362,7 @@ function setTransientDisplay(display: PetTransientDisplay): void {
 
   transientDisplayTimeout = setTimeout(() => {
     transientDisplay = null;
+    transientDismissHandler = null;
     transientDisplayTimeout = null;
     if (transientAnimationTimeout) {
       clearTimeout(transientAnimationTimeout);
@@ -351,6 +371,13 @@ function setTransientDisplay(display: PetTransientDisplay): void {
     refreshDefaultPetContent();
   }, displayDurationMs);
 
+  refreshDefaultPetContent();
+}
+
+/** Clear the host-owned transient bubble without treating it as a user click. */
+export function clearDefaultPetTransientDisplay(): void {
+  if (!transientDisplay) return;
+  clearDefaultPetDisplayTimers();
   refreshDefaultPetContent();
 }
 
@@ -449,6 +476,7 @@ function clearDefaultPetDisplayTimers(): void {
   transientAnimationTimeout = null;
   statusBadgeTimeout = null;
   transientDisplay = null;
+  transientDismissHandler = null;
   statusBadge = null;
 }
 
@@ -512,6 +540,12 @@ export function shouldOpenDefaultPetOnLaunch(): boolean {
 export function resetDefaultPetToInitialPosition(): void {
   const safePosition = getSafeDefaultPetPosition(getDefaultPetInitialPosition(defaultPetWindowSize));
   resetDefaultPetPosition(safePosition);
+
+  // "Reset Pet Position" is a recovery action. If the pet was hidden or its
+  // window did not exist, moving persisted coordinates alone looked like the
+  // button did nothing. Reset now also restores the visible default pet and
+  // its show-on-launch preference.
+  showDefaultPet();
 
   if (defaultPetWindow && !defaultPetWindow.isDestroyed()) {
     defaultPetWindow.setPosition(safePosition.x, safePosition.y, false);

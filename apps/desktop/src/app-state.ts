@@ -4,11 +4,12 @@ import { dirname, isAbsolute, join } from "node:path";
 
 import { app } from "electron";
 
-import { defaultPetScale, markOnboardingCompleted, normalizeOnboardingCompleted, normalizePetConfinementEnabled, normalizePetCrossDisplayEnabled, normalizePetGravityEnabled, normalizePetScale, petScaleOptions, type PetScaleValue } from "./app-state-core.js";
+import { defaultPetScale, markOnboardingCompleted, normalizeOnboardingCompleted, normalizePetConfinementEnabled, normalizePetCrossDisplayEnabled, normalizePetGravityEnabled, normalizePetScale, normalizeReadSpeechBubblesAloud, petScaleOptions, type PetScaleValue } from "./app-state-core.js";
 import { builtInPet } from "./built-in-pet.js";
+import { normalizeCodexReactionPreferences, type CodexReactionPreferences } from "./codex-reaction-preferences.js";
 import type { Point } from "./display.js";
 import { isSupportedLocale, type LocalePreference } from "./i18n/catalog.js";
-import { allowedReactions, type OpenPetsReaction } from "./local-ipc-protocol.js";
+import { allowedIntegrationLifecycles, allowedReactions, type OpenPetsIntegrationLifecycle, type OpenPetsReaction } from "./local-ipc-protocol.js";
 import { assertSafePetId, getInstalledPetDir } from "./pet-paths.js";
 import { normalizePetPoolOrder } from "./pet-pool.js";
 import { publishPluginAgentActivity } from "./plugin-events-source.js";
@@ -43,10 +44,12 @@ export interface OpenPetsStateV1 {
     readonly openDefaultPetOnLaunch: boolean;
     readonly locale: LocalePreference;
     readonly speechBubblesEnabled: boolean;
+    readonly readSpeechBubblesAloud: boolean;
     readonly petScale: number;
     readonly reactionAnimationOverrides?: ReactionAnimationOverrides;
     readonly onboardingCompleted: boolean;
     readonly claudeCommandPath?: string;
+    readonly codexCommandPath?: string;
     readonly nodeCommandPath?: string;
     readonly opencodeCommandPath?: string;
     /** Ordered pool of pet IDs for sequential session assignment. Slot 0 is the primary pet.
@@ -83,6 +86,16 @@ export interface OpenPetsStateV1 {
      * Capped at 8 entries (LRU eviction) so the state file does not grow unboundedly.
      */
     readonly perMonitorPositions?: Readonly<Record<string, Point>>;
+  };
+  readonly integrations: {
+    readonly codex: {
+      readonly reactionPreferences: CodexReactionPreferences;
+      readonly lastEvent?: {
+        readonly lifecycle: OpenPetsIntegrationLifecycle;
+        readonly occurredAt: number;
+        readonly receivedAt: number;
+      };
+    };
   };
   readonly analytics: OpenPetsAnalyticsState;
 }
@@ -362,6 +375,49 @@ export function recordOpenPetsActivity(activity: OpenPetsActivityRecord, now: nu
   return getAppStateSnapshot();
 }
 
+export function recordCodexIntegrationEvent(
+  event: { readonly lifecycle: OpenPetsIntegrationLifecycle; readonly occurredAt: number },
+  receivedAt: number = Date.now(),
+): OpenPetsStateV1 {
+  const state = getInitializedState();
+  const nextState = normalizeState({
+    ...state,
+    integrations: {
+      ...state.integrations,
+      codex: {
+        ...state.integrations.codex,
+        lastEvent: {
+          lifecycle: event.lifecycle,
+          occurredAt: Math.floor(event.occurredAt),
+          receivedAt: Math.floor(receivedAt),
+        },
+      },
+    },
+  });
+  commitState(nextState);
+  return getAppStateSnapshot();
+}
+
+export function updateCodexReactionPreferences(patch: Partial<CodexReactionPreferences>): OpenPetsStateV1 {
+  const state = getInitializedState();
+  const reactionPreferences = normalizeCodexReactionPreferences({
+    ...state.integrations.codex.reactionPreferences,
+    ...patch,
+  });
+  const nextState = normalizeState({
+    ...state,
+    integrations: {
+      ...state.integrations,
+      codex: {
+        ...state.integrations.codex,
+        reactionPreferences,
+      },
+    },
+  });
+  commitState(nextState);
+  return getAppStateSnapshot();
+}
+
 export function installPetState(pet: Omit<InstalledPetState, "builtIn" | "protected" | "installed">): OpenPetsStateV1 {
   const state = getInitializedState();
 
@@ -520,8 +576,26 @@ function normalizeState(value: unknown): OpenPetsStateV1 {
       installed: installedPets,
     },
     defaultPet,
+    integrations: normalizeIntegrations(record.integrations),
     analytics: normalizeAnalytics(record.analytics),
   };
+}
+
+function normalizeIntegrations(value: unknown): OpenPetsStateV1["integrations"] {
+  const record = isRecord(value) ? value : {};
+  const codex = isRecord(record.codex) ? record.codex : {};
+  const lastEvent = normalizeCodexLastEvent(codex.lastEvent);
+  const reactionPreferences = normalizeCodexReactionPreferences(codex.reactionPreferences);
+  return { codex: { reactionPreferences, ...(lastEvent ? { lastEvent } : {}) } };
+}
+
+function normalizeCodexLastEvent(value: unknown): OpenPetsStateV1["integrations"]["codex"]["lastEvent"] {
+  if (!isRecord(value) || typeof value.lifecycle !== "string") return undefined;
+  if (!allowedIntegrationLifecycles.includes(value.lifecycle as OpenPetsIntegrationLifecycle)) return undefined;
+  const occurredAt = normalizeTimestamp(value.occurredAt);
+  const receivedAt = normalizeTimestamp(value.receivedAt);
+  if (!occurredAt || !receivedAt) return undefined;
+  return { lifecycle: value.lifecycle as OpenPetsIntegrationLifecycle, occurredAt, receivedAt };
 }
 
 function normalizeAnalytics(value: unknown): OpenPetsAnalyticsState {
@@ -592,10 +666,12 @@ function normalizePreferences(value: Partial<OpenPetsStateV1["preferences"]>): O
       : defaultState.preferences.openDefaultPetOnLaunch,
     locale: normalizeLocalePreference(value.locale),
     speechBubblesEnabled: true,
+    readSpeechBubblesAloud: normalizeReadSpeechBubblesAloud(value.readSpeechBubblesAloud),
     petScale: normalizePetScale(value.petScale),
     reactionAnimationOverrides: normalizeReactionAnimationOverrides(value.reactionAnimationOverrides),
     onboardingCompleted: normalizeOnboardingCompleted(value),
     claudeCommandPath: normalizeCommandPath(value.claudeCommandPath),
+    codexCommandPath: normalizeCommandPath(value.codexCommandPath),
     nodeCommandPath: normalizeCommandPath(value.nodeCommandPath),
     opencodeCommandPath: normalizeCommandPath(value.opencodeCommandPath),
     petPoolOrder: normalizePetPoolOrder(value.petPoolOrder),
@@ -672,10 +748,12 @@ function createDefaultState(): OpenPetsStateV1 {
       openDefaultPetOnLaunch: true,
       locale: "system",
       speechBubblesEnabled: true,
+      readSpeechBubblesAloud: false,
       petScale: defaultPetScale,
       reactionAnimationOverrides: undefined,
       onboardingCompleted: false,
       claudeCommandPath: undefined,
+      codexCommandPath: undefined,
       nodeCommandPath: undefined,
       opencodeCommandPath: undefined,
       petPoolOrder: undefined,
@@ -688,6 +766,11 @@ function createDefaultState(): OpenPetsStateV1 {
       installed: [builtInPet],
     },
     defaultPet: {},
+    integrations: {
+      codex: {
+        reactionPreferences: normalizeCodexReactionPreferences(undefined),
+      },
+    },
     analytics: {
       distinctId: randomUUID(),
       consent: "unset",

@@ -194,7 +194,7 @@ export const es419: Partial<Messages> = {
   "settings.general.eyebrow": "Entorno",
   "settings.general.title": "Configuración general",
   "settings.general.showOnLaunch.title": "Mostrar la mascota al iniciar",
-  "settings.general.showOnLaunch.description": "Mantén OpenPets en la bandeja pero oculta la mascota hasta que la solicites.",
+    "settings.general.showOnLaunch.description": "Muestra la mascota predeterminada automáticamente cada vez que se inicia OpenPets.",
   "settings.general.launchAtLogin.title": "Iniciar al iniciar sesión",
   "settings.general.launchAtLogin.supported": "Inicia OpenPets automáticamente cuando se enciende tu computadora.",
   "settings.general.launchAtLogin.unsupported": "No es compatible con esta plataforma.",

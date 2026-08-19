@@ -1,0 +1,54 @@
+model_name: hey_pedra
+target_phrases: ["hey pedra"]
+
+# A practical production classifier: enough synthetic diversity for broad
+# desktop voices without making release builds train the model implicitly.
+n_samples: 10000
+n_samples_val: 2000
+n_background_samples: 1000
+n_background_samples_val: 250
+tts_batch_size: 25
+
+custom_negative_phrases:
+  - "pedra"
+  - "pedro"
+  - "hey pedro"
+  - "hey petra"
+  - "hey peta"
+  - "hey better"
+  - "a pet rock"
+  - "play better"
+  - "they better"
+  - "hey bedroom"
+
+noise_scales: [0.85, 0.98]
+noise_scale_ws: [0.85, 0.98]
+length_scales: [0.75, 0.9, 1.0, 1.15, 1.25]
+slerp_weights: [0.2, 0.35, 0.5, 0.65, 0.8]
+
+data_dir: ./data
+output_dir: ./output
+
+augmentation:
+  clip_duration: 2.0
+  batch_size: 12
+  rounds: 3
+  background_paths: [./data/backgrounds]
+  rir_paths: [./data/rirs]
+
+model:
+  model_type: conv_attention
+  model_size: small
+
+steps: 50000
+learning_rate: 0.0001
+weight_decay: 0.01
+label_smoothing: 0.05
+max_negative_weight: 3000
+target_fp_per_hour: 0.2
+
+batch_n_per_class:
+  positive: 40
+  adversarial_negative: 40
+  ACAV100M_sample: 512
+  background_noise: 40

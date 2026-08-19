@@ -97,6 +97,8 @@ type MotionState = {
 
 const motionStates = new Map<string, { accessor: WindowAccessor; state: MotionState }>();
 const loopIntervalMs = 16;
+const minSetPositionCoordinate = -2_147_483_648;
+const maxSetPositionCoordinate = 2_147_483_647;
 
 // Shared ticker — one interval for all pets
 let sharedTicker: NodeJS.Timeout | null = null;
@@ -111,13 +113,17 @@ function stopSharedTicker(): void {
   if (sharedTicker) { clearInterval(sharedTicker); sharedTicker = null; }
 }
 
+function needsSharedTicker(state: MotionState): boolean {
+  return state.follow !== null || state.physics !== null || state.moveTarget !== null;
+}
+
 function tickAll(): void {
   for (const [petHandleId, { accessor, state }] of motionStates) {
-    if (state.follow === null && state.physics === null) continue;
+    if (!needsSharedTicker(state)) continue;
     tickPet(petHandleId, accessor, state);
   }
-  // Stop ticker when no pet needs continuous motion
-  if ([...motionStates.values()].every(e => e.state.follow === null && e.state.physics === null)) {
+  // Stop ticker when no pet needs continuous or delegated move-to motion.
+  if ([...motionStates.values()].every(({ state }) => !needsSharedTicker(state))) {
     stopSharedTicker();
   }
 }
@@ -155,7 +161,7 @@ export function unregisterPet(petHandleId: string): void {
   motionStop(petHandleId);
   motionStates.delete(petHandleId);
   // Eagerly stop ticker if no remaining pets need motion
-  if ([...motionStates.values()].every(e => e.state.follow === null && e.state.physics === null)) {
+  if ([...motionStates.values()].every(({ state }) => !needsSharedTicker(state))) {
     stopSharedTicker();
   }
 }
@@ -172,9 +178,17 @@ export async function motionMoveTo(petHandleId: string, accessor: WindowAccessor
   // in MotionState and let syncLoop handle interpolation. This avoids the
   // competing-writer race that causes jitter.
   if (state.follow !== null || state.physics !== null) {
-    const [startX, startY] = window.getPosition();
+    const [reportedStartX, reportedStartY] = window.getPosition();
     const clamped = clampPosition(petHandleId, target);
+    // Native coordinates can be transiently unavailable during display changes.
+    // Falling back to the already-clamped target keeps the delegated move finite;
+    // the next valid tick can then settle it without ever writing NaN.
+    const startX = Number.isFinite(reportedStartX) ? reportedStartX : clamped.x;
+    const startY = Number.isFinite(reportedStartY) ? reportedStartY : clamped.y;
     state.moveTarget = { x: clamped.x, y: clamped.y, startX, startY, elapsed: 0, durationMs, easing };
+    // A move that was delegated while follow/physics was active remains shared-
+    // ticker work even if that continuous mode is disabled before it completes.
+    startSharedTicker();
     // Return a promise that resolves when the generation changes (move completes or is superseded).
     return new Promise<void>((resolve) => {
       const check = () => {
@@ -195,8 +209,7 @@ export async function motionMoveTo(petHandleId: string, accessor: WindowAccessor
     const t = easeProgress(step / steps, easing);
     const nextX = Math.round(startX + (clamped.x - startX) * t);
     const nextY = Math.round(startY + (clamped.y - startY) * t);
-    if (!Number.isFinite(nextX) || !Number.isFinite(nextY)) return;  // abort move if NaN (e.g. startX was NaN from mid-destroy getPosition)
-    live.setPosition(nextX, nextY, false);
+    if (!trySetWindowPosition(live, nextX, nextY)) return;
     await delay(durationMs / steps);
   }
 }
@@ -230,7 +243,7 @@ export function motionStopAll(): void {
 }
 
 function syncLoop(petHandleId: string, _accessor: WindowAccessor, state: MotionState): void {
-  const wantsLoop = state.follow !== null || state.physics !== null;
+  const wantsLoop = needsSharedTicker(state);
   if (!wantsLoop) {
     // stop.loop field can be removed from MotionState eventually; keep null for now
     if (state.loop) { clearInterval(state.loop); state.loop = null; }
@@ -334,9 +347,27 @@ function tickPet(petHandleId: string, accessor: WindowAccessor, state: MotionSta
 
   if (nextX !== x || nextY !== y) {
     const clamped = clampPosition(petHandleId, { x: nextX, y: nextY });
-    if (!Number.isFinite(clamped.x) || !Number.isFinite(clamped.y)) return;  // skip write when clamp produces NaN (e.g. from NaN workArea on monitor disconnect)
-    window.setPosition(clamped.x, clamped.y, false);
+    if (!trySetWindowPosition(window, clamped.x, clamped.y)) unregisterPet(petHandleId);
   }
+}
+
+function trySetWindowPosition(window: BrowserWindow, x: number, y: number): boolean {
+  if (!isValidSetPositionCoordinate(x) || !isValidSetPositionCoordinate(y) || window.isDestroyed()) return false;
+  try {
+    window.setPosition(x, y, false);
+    return true;
+  } catch {
+    // Native windows can be destroyed or temporarily reject coordinate
+    // conversion between the liveness checks above and this write. Motion is
+    // best-effort and must never escape the shared timer as an uncaught error.
+    return false;
+  }
+}
+
+function isValidSetPositionCoordinate(value: number): boolean {
+  return Number.isInteger(value)
+    && value >= minSetPositionCoordinate
+    && value <= maxSetPositionCoordinate;
 }
 
 function delay(ms: number): Promise<void> {

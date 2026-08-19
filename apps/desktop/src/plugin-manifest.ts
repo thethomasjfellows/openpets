@@ -28,6 +28,7 @@ export type PluginPermission =
   | "ui:toast"
   | "ui:panel"
   | "ui:delivery"
+  | "companion:context"
   | "notify"
   | "bus"
   | "ai"
@@ -42,7 +43,7 @@ export type PluginPermission =
   | "network:write";
 export type PluginJavascriptPermission = Exclude<PluginPermission, "timer">;
 /** Permissions flagged sensitive in the UI (louder consent, global toggles). */
-export const sensitivePluginPermissions: ReadonlySet<PluginPermission> = new Set(["voice:listen", "clipboard", "pet:speak:dynamic"]);
+export const sensitivePluginPermissions: ReadonlySet<PluginPermission> = new Set(["voice:listen", "clipboard", "pet:speak:dynamic", "companion:context"]);
 export type PluginIcon = "plugin" | "bell" | "timer" | "github" | "heart" | "sparkles" | "coffee" | "focus" | "droplet";
 export type PluginConfigFieldType = "text" | "textarea" | "number" | "boolean" | "select" | "time" | "date" | "multiSelect" | "list" | "secret" | "sound";
 
@@ -142,6 +143,7 @@ export const pluginV3Permissions = [
   "ui:toast",
   "ui:panel",
   "ui:delivery",
+  "companion:context",
   "notify",
   "bus",
   "ai",

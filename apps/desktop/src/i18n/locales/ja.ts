@@ -194,7 +194,7 @@ export const ja: Partial<Messages> = {
   "settings.general.eyebrow": "環境",
   "settings.general.title": "一般設定",
   "settings.general.showOnLaunch.title": "起動時にペットを表示",
-  "settings.general.showOnLaunch.description": "OpenPets をトレイに常駐させつつ、要求があるまでペットを非表示にします。",
+    "settings.general.showOnLaunch.description": "OpenPets の起動時にデフォルトのペットを自動的に表示します。",
   "settings.general.launchAtLogin.title": "ログイン時に起動",
   "settings.general.launchAtLogin.supported": "コンピューターの起動時に OpenPets を自動的に開始します。",
   "settings.general.launchAtLogin.unsupported": "このプラットフォームではサポートされていません。",

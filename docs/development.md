@@ -10,11 +10,16 @@ their own doc, [testing-and-validation.md](testing-and-validation.md).
   `packages/*`. Package manager pinned to `pnpm@11.x`; Node `>=20`.
 - **ESM + TypeScript everywhere**: every package is `"type": "module"` with dual
   type exports; internal links use `workspace:*`.
-- **`web/` uses Bun + Nuxt** and is a separate toolchain — its commands run from
-  `web/` with `bun`, not pnpm. Only its data/catalog side is in scope here (see
-  [catalog.md](catalog.md)).
+- **`web/` uses Bun + Nuxt** and is a separate, ignored toolchain — its own
+  commands run from `web/` with Bun. The tracked root plugin producer is
+  `scripts/sync-plugins.mjs`; it materializes plugin catalogs and ZIP staging
+  under `web/` before the separate deploy. Only the data/catalog side is in
+  scope here (see [catalog.md](catalog.md)).
 - **Versioning**: packages align around SDK v3 / `manifestVersion 3`. The
   workspace version is in the root `package.json` (`3.1.0` at time of writing).
+- **Plugin checkout bytes**: root `.gitattributes` fixes current plugin text
+  formats to LF and WebP to binary. Update those narrow rules when adding a new
+  plugin file format because reviewed-tree and ZIP hashes use raw checkout bytes.
 
 The authoritative structural map is the root `codemap.md` plus per-folder
 `codemap.md` files; read those before editing a subsystem.
@@ -44,6 +49,7 @@ All from the repo root unless noted (full list in root `package.json`):
 | `openpets plugin new <name> --template <t>` | Scaffold an SDK v3 plugin |
 | `openpets plugin validate <dir>` | Validate a plugin locally |
 | `pnpm plugins:test` | Locale checks + official-plugin harness tests |
+| `pnpm plugins:package:test` | Deterministic/strict ZIP, manifest parity, reviewed digest, and safe path/symlink producer contracts |
 | `pnpm plugins:check` | Dry-run the catalog package plan |
 | `pnpm plugins:package` | Build catalog + ZIP staging (no upload) |
 | `pnpm plugins:validate-release` | Pre-ship release gate |
@@ -98,14 +104,34 @@ workspace packages. Packages must build and pass `check`/`test` first.
 `pnpm release:desktop` (`apps/desktop/scripts/release-local.mjs`) does a
 macOS-local build + packaging and creates a GitHub draft release.
 `electron-builder` handles cross-platform packaging; bundled mode unpacks the
-integration CLIs and bundles `plugins/official` as extra resources (verified by
-the packaging contract — see [testing-and-validation.md](testing-and-validation.md)).
+integration CLIs, bundles `plugins/official`, and copies one validated
+target-specific Sherpa wake bundle outside ASAR. Native wake helpers are prepared
+on their target OS (macOS can prepare both macOS architectures); release assembly
+requires prebuilt validated Windows/Linux bundles instead of cross-packaging a
+macOS helper. Run `wake:prepare`, `wake:smoke`, build main, then
+`wake:stage` for a manual target build. Smoke evidence is hash-bound to the exact
+helper and manifest. Ordinary `package`/`package:dir` commands reject cross-target
+arguments and package only the current host/architecture (using the Windows
+`pnpm.cmd` shim when needed). On macOS, an ordinary local package keeps a real
+Developer ID signature unchanged; when electron-builder produces an ad-hoc
+signature instead, the packaging runner replaces its changing CDHash-only
+designated requirement with the stable `dev.openpets.app` identifier. This lets
+macOS privacy grants follow future local rebuilds installed at the canonical
+Applications path instead of treating every build as a different app. The
+release script stages each explicitly attested target immediately before its build, rejects
+native evidence from different helper build inputs, and validates the resources
+actually emitted after each target's builder run. The packaging contract
+revalidates the installed bundle — see
+[testing-and-validation.md](testing-and-validation.md).
 
 ### Web catalog
 
 Pet and plugin catalog deploys run from `web/` with Bun (`bun run deploy`,
-`pnpm plugins:deploy`). Catalog generation/verification is in [catalog.md](catalog.md)
-and the runbooks under `web/docs/`.
+`pnpm plugins:deploy`). Plugin generation itself runs from the root through the
+tracked `scripts/sync-plugins.mjs`; `plugins:package` writes local artifacts and
+`plugins:publish` additionally uploads ZIPs with Wrangler. Catalog
+generation/verification is in [catalog.md](catalog.md) and the runbooks under
+`web/docs/`.
 
 ## Cross-platform & Linux testing
 

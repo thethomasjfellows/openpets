@@ -194,7 +194,7 @@ export const zhHant: Partial<Messages> = {
   "settings.general.eyebrow": "環境",
   "settings.general.title": "一般設定",
   "settings.general.showOnLaunch.title": "啟動時顯示寵物",
-  "settings.general.showOnLaunch.description": "將 OpenPets 保留在工作列，但在需要時才顯示寵物。",
+    "settings.general.showOnLaunch.description": "每次 OpenPets 啟動時自動顯示預設寵物。",
   "settings.general.launchAtLogin.title": "登入時啟動",
   "settings.general.launchAtLogin.supported": "在電腦開機時自動啟動 OpenPets。",
   "settings.general.launchAtLogin.unsupported": "此平台不支援。",

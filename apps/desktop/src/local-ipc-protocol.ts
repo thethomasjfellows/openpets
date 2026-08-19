@@ -25,8 +25,19 @@ export const allowedReactions = [
   "celebrating",
 ] as const;
 
+export const allowedIntegrationLifecycles = [
+  "thinking",
+  "working",
+  "editing",
+  "testing",
+  "waiting",
+  "success",
+  "error",
+] as const;
+
 export type OpenPetsReaction = typeof allowedReactions[number];
-export type OpenPetsIpcMethod = "hello" | "status" | "pets.list" | "pets.install" | "lease.acquire" | "lease.heartbeat" | "lease.release" | "pet.react" | "pet.say" | "pet.showMedia" | "pets.install-local";
+export type OpenPetsIntegrationLifecycle = typeof allowedIntegrationLifecycles[number];
+export type OpenPetsIpcMethod = "hello" | "status" | "pets.list" | "pets.install" | "lease.acquire" | "lease.heartbeat" | "lease.release" | "pet.react" | "pet.say" | "pet.showMedia" | "pets.install-local" | "integration.event";
 
 export interface OpenPetsIpcRequest {
   readonly id: string;
@@ -61,7 +72,7 @@ export function parseIpcRequest(raw: string, expectedToken: string): OpenPetsIpc
   if (typeof parsed.id !== "string" || parsed.id.length < 1 || parsed.id.length > 120) throw new IpcProtocolError("invalid_request", "IPC request id is invalid.");
   if (parsed.version !== openPetsIpcVersion) throw new IpcProtocolError("invalid_version", "Unsupported IPC protocol version.");
   if (parsed.token !== expectedToken) throw new IpcProtocolError("invalid_token", "Invalid IPC token.");
-  if (parsed.method !== "hello" && parsed.method !== "status" && parsed.method !== "pets.list" && parsed.method !== "pets.install" && parsed.method !== "lease.acquire" && parsed.method !== "lease.heartbeat" && parsed.method !== "lease.release" && parsed.method !== "pet.react" && parsed.method !== "pet.say" && parsed.method !== "pet.showMedia" && parsed.method !== "pets.install-local") {
+  if (parsed.method !== "hello" && parsed.method !== "status" && parsed.method !== "pets.list" && parsed.method !== "pets.install" && parsed.method !== "lease.acquire" && parsed.method !== "lease.heartbeat" && parsed.method !== "lease.release" && parsed.method !== "pet.react" && parsed.method !== "pet.say" && parsed.method !== "pet.showMedia" && parsed.method !== "pets.install-local" && parsed.method !== "integration.event") {
     throw new IpcProtocolError("unknown_method", "Unknown IPC method.");
   }
 
@@ -71,6 +82,27 @@ export function parseIpcRequest(raw: string, expectedToken: string): OpenPetsIpc
     token: parsed.token,
     method: parsed.method,
     params: parsed.params,
+  };
+}
+
+export function validateIntegrationEvent(value: unknown): {
+  readonly integrationId: "codex";
+  readonly lifecycle: OpenPetsIntegrationLifecycle;
+  readonly occurredAt: number;
+} {
+  if (!isRecord(value) || value.integrationId !== "codex") {
+    throw new IpcProtocolError("invalid_params", "Invalid integration event source.");
+  }
+  if (typeof value.lifecycle !== "string" || !allowedIntegrationLifecycles.includes(value.lifecycle as OpenPetsIntegrationLifecycle)) {
+    throw new IpcProtocolError("invalid_params", "Invalid integration lifecycle.");
+  }
+  if (typeof value.occurredAt !== "number" || !Number.isFinite(value.occurredAt) || value.occurredAt <= 0) {
+    throw new IpcProtocolError("invalid_params", "Invalid integration event timestamp.");
+  }
+  return {
+    integrationId: "codex",
+    lifecycle: value.lifecycle as OpenPetsIntegrationLifecycle,
+    occurredAt: Math.floor(value.occurredAt),
   };
 }
 

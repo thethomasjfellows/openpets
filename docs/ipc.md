@@ -71,11 +71,16 @@ shapes before returning.
 | `pet.react` | Set a pet reaction (animation state) |
 | `pet.say` | Show a speech bubble on a pet |
 | `pet.showMedia` | Show a local image inside a pet's speech bubble |
+| `integration.event` | Record a sanitized first-party integration lifecycle event |
 | `lease.acquire` / `lease.heartbeat` / `lease.release` | Manage a pet lease |
 
 Client method names (`hello()`, `status()`, `listPets()`, `installPet()`,
 `installLocalPet()`, `acquireLease()`, `heartbeatLease()`, `releaseLease()`,
-`react()`, `say()`, `showMedia()`) wrap these. `installLocalPet()` requires an
+`react()`, `say()`, `showMedia()`, `recordIntegrationEvent()`) wrap these.
+`integration.event` currently accepts only the `codex` integration id, one of
+the allow-listed lifecycle names, and a finite timestamp. Validation constructs
+a fresh safe object; extra hook fields such as prompt/tool content are discarded
+before app state is written. `installLocalPet()` requires an
 absolute path and an explicit `zip`/`folder` kind. `react()`/`say()`/
 `showMedia()` accept an optional `leaseId` to target a specific pet.
 
@@ -95,6 +100,35 @@ site (`https:`). Validation is deny-list based: local-content and script
 schemes (`file:`, `javascript:`, `data:`, …), plain `http:`, and side-effect
 Windows shell handlers are rejected; unregistered custom schemes are an OS
 no-op.
+
+## Control Center IPC is a separate boundary
+
+Companion Conversations is not added to the public agent/client protocol above.
+It uses narrow Electron IPC between the sandboxed Control Center renderer,
+`control-center-preload.cjs`, and sender-validated handlers in `windows.ts`:
+
+| Internal channel group | Purpose |
+|------------------------|---------|
+| `openpets:companion-settings-get`, `companion-enable` / `-disable`, `companion-settings-update` | Read consented state and mutate allow-listed global choices |
+| `openpets:companion-pet-settings-update` | Update the selected installed pet's bounded personality |
+| `openpets:companion-memory-clear` | Clear one pet's recent memory, or all recent memory |
+| `openpets:companion-target-health` | Probe Codex or host-AI readiness without exposing credentials |
+| `openpets:voice-wake-health`, `voice-wake-snapshot` | Report the truthful packaged wake capability and inert/armed lifecycle state without exposing raw audio |
+| `openpets:plugin-platform-settings-*` | Configure plugin-wide capability gates and expose the host-AI compatibility projection |
+| `openpets:host-ai-*` | Select the global direct provider, update one provider profile, load its model catalog, check readiness, and expose provider-scoped key presence only |
+| `openpets:codex-review-hooks` | Open an interactive Codex CLI session for user-owned hook review without approving hooks or writing trust state |
+| `openpets:codex-review-complete` | Refocus the existing Control Center after its read-only trust poll confirms approval |
+
+The `openpets:control-center-route` event and initial URL query use a normalized
+`{ route, petId?, section?, notice? }` request. `section: "companion"` is valid
+only for the Pets route; pet IDs are resolved against installed, non-broken pets
+before the renderer selects or focuses a composer.
+
+Provider calls, prompts, recent-memory files, raw audio, and secrets remain in
+the main process. The renderer receives settings snapshots, health/listening
+state, bounded errors, and the response that was already shown in the pet
+bubble. The public local IPC intentionally cannot read or mutate personality,
+profile, Companion memory, provider credentials, or proactive history.
 
 ## The lease model
 

@@ -1,0 +1,521 @@
+import { randomUUID } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { basename, join } from "node:path";
+
+import { hostAiProviderIds, type AiBrainProviderKind } from "./host-ai-settings.js";
+import { assertSafeCompanionPetId } from "./companion-settings.js";
+
+export type VisionStoredEntry = {
+  readonly id: string;
+  readonly petId: string;
+  readonly captureGroupId?: string;
+  readonly capturedAt: number;
+  readonly expiresAt: number;
+  readonly displayId?: string;
+  readonly displayLabel?: string;
+  readonly displayBounds?: VisionDisplayBounds;
+  readonly primaryDisplay?: boolean;
+  readonly screenshotFileName: string;
+  readonly screenshotBytes: number;
+  readonly mimeType: "image/png" | "image/jpeg";
+  readonly summaryText: string;
+  readonly summaryCreatedAt: number;
+  readonly provider: AiBrainProviderKind;
+  readonly model: string;
+};
+
+export type VisionContextSummary = {
+  readonly id: string;
+  readonly capturedAt: number;
+  readonly summaryText: string;
+  readonly displayLabel?: string;
+};
+
+export type VisionInspectionScreen = {
+  readonly id: string;
+  readonly capturedAt: number;
+  readonly displayId?: string;
+  readonly displayLabel?: string;
+  readonly displayBounds?: VisionDisplayBounds;
+  readonly primaryDisplay?: boolean;
+  readonly mimeType: "image/png" | "image/jpeg";
+  readonly image: Uint8Array;
+};
+
+export type VisionDisplayBounds = {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+};
+
+export type VisionStoreSnapshot = {
+  readonly version: 1;
+  readonly entries: readonly VisionStoredEntry[];
+  readonly screenshotBytes: number;
+  readonly oldestAt?: number;
+  readonly newestAt?: number;
+  readonly lastPurgeAt?: number;
+  readonly deleteError: boolean;
+  readonly persisted: boolean;
+};
+
+export type AddVisionEntryInput = {
+  readonly id?: string;
+  readonly petId: string;
+  readonly captureGroupId?: string;
+  readonly capturedAt?: number;
+  readonly displayId?: string;
+  readonly displayLabel?: string;
+  readonly displayBounds?: VisionDisplayBounds;
+  readonly primaryDisplay?: boolean;
+  readonly screenshot: Uint8Array;
+  readonly mimeType?: "image/png" | "image/jpeg";
+  readonly summaryText: string;
+  readonly summaryCreatedAt?: number;
+  readonly provider: AiBrainProviderKind;
+  readonly model: string;
+};
+
+export const visionRetentionMs = 24 * 60 * 60 * 1_000;
+export const maxVisionEntries = 192;
+export const maxVisionScreenshotBytes = 1 * 1_024 * 1_024;
+export const maxVisionRetainedScreenshotBytes = 48 * 1_024 * 1_024;
+export const maxVisionSummaryCharacters = 900;
+export const maxVisionIndexBytes = 512 * 1_024;
+export const visionStorageDirectoryName = "openpets-vision";
+
+const maxFutureSkewMs = 5 * 60 * 1_000;
+const safeEntryIdPattern = /^[A-Za-z0-9._:-]{1,120}$/;
+const visionIndexTempPattern = /^openpets-vision-index\.json\.\d+\.tmp$/;
+const providers = new Set<AiBrainProviderKind>(["none", ...hostAiProviderIds, "codex"]);
+
+export class VisionStore {
+  readonly storageDirectory: string;
+  readonly screenshotsDirectory: string;
+  readonly indexPath: string;
+
+  #entries: VisionStoredEntry[] = [];
+  #lastPurgeAt: number | undefined;
+  #deleteError = false;
+  #persisted = true;
+
+  constructor(userDataPath: string, now = Date.now()) {
+    this.storageDirectory = join(userDataPath, visionStorageDirectoryName);
+    this.screenshotsDirectory = join(this.storageDirectory, "screenshots");
+    this.indexPath = join(this.storageDirectory, "openpets-vision-index.json");
+    mkdirSync(this.screenshotsDirectory, { recursive: true, mode: 0o700 });
+    this.#cleanupIndexTemps();
+    this.#entries = this.#readEntries();
+    this.prune(now);
+  }
+
+  snapshot(now = Date.now()): VisionStoreSnapshot {
+    this.prune(now);
+    const screenshotBytes = this.#entries.reduce((total, entry) => total + entry.screenshotBytes, 0);
+    return {
+      version: 1,
+      entries: this.#entries.map((entry) => ({ ...entry })),
+      screenshotBytes,
+      ...(this.#entries[0] ? { oldestAt: this.#entries[0].capturedAt } : {}),
+      ...(this.#entries.at(-1) ? { newestAt: this.#entries.at(-1)!.capturedAt } : {}),
+      ...(this.#lastPurgeAt === undefined ? {} : { lastPurgeAt: this.#lastPurgeAt }),
+      deleteError: this.#deleteError,
+      persisted: this.#persisted,
+    };
+  }
+
+  addCompletedEntry(input: AddVisionEntryInput): { readonly entry: VisionStoredEntry; readonly persisted: boolean } {
+    assertSafeCompanionPetId(input.petId);
+    const id = input.id ?? randomUUID();
+    if (!safeEntryIdPattern.test(id)) throw new Error("Invalid Vision entry id.");
+    if (input.captureGroupId !== undefined && !safeEntryIdPattern.test(input.captureGroupId)) {
+      throw new Error("Invalid Vision capture group id.");
+    }
+    if (this.#entries.some((entry) => entry.id === id)) throw new Error("Vision entry id already exists.");
+    if (!(input.screenshot instanceof Uint8Array) || input.screenshot.byteLength === 0
+      || input.screenshot.byteLength > maxVisionScreenshotBytes) {
+      throw new Error("Vision screenshot is empty or exceeds the local size limit.");
+    }
+    const summaryText = normalizeSummary(input.summaryText);
+    if (!summaryText) throw new Error("Vision summary is required.");
+    const capturedAt = normalizeTimestamp(input.capturedAt ?? Date.now());
+    const summaryCreatedAt = normalizeTimestamp(input.summaryCreatedAt ?? capturedAt);
+    const mimeType = input.mimeType ?? "image/png";
+    const screenshotFileName = `${id}.${mimeType === "image/jpeg" ? "jpg" : "png"}`;
+    const screenshotPath = join(this.screenshotsDirectory, screenshotFileName);
+    const temporaryPath = `${screenshotPath}.${process.pid}.tmp`;
+    const entry: VisionStoredEntry = {
+      id,
+      petId: input.petId,
+      ...(input.captureGroupId ? { captureGroupId: input.captureGroupId } : {}),
+      capturedAt,
+      expiresAt: capturedAt + visionRetentionMs,
+      ...(normalizeDisplayId(input.displayId) ? { displayId: normalizeDisplayId(input.displayId) } : {}),
+      ...(normalizeDisplayLabel(input.displayLabel) ? { displayLabel: normalizeDisplayLabel(input.displayLabel) } : {}),
+      ...(normalizeDisplayBounds(input.displayBounds) ? { displayBounds: normalizeDisplayBounds(input.displayBounds) } : {}),
+      ...(typeof input.primaryDisplay === "boolean" ? { primaryDisplay: input.primaryDisplay } : {}),
+      screenshotFileName,
+      screenshotBytes: input.screenshot.byteLength,
+      mimeType,
+      summaryText,
+      summaryCreatedAt,
+      provider: providers.has(input.provider) ? input.provider : "none",
+      model: normalizeModel(input.model),
+    };
+
+    mkdirSync(this.screenshotsDirectory, { recursive: true, mode: 0o700 });
+    try {
+      writeFileSync(temporaryPath, input.screenshot, { mode: 0o600 });
+      renameSync(temporaryPath, screenshotPath);
+      const previous = this.#entries;
+      const next = this.#normalizeEntries([...previous, entry], capturedAt);
+      this.#entries = next;
+      const persisted = this.#persist();
+      if (!persisted) {
+        this.#entries = previous;
+        this.#removeScreenshot(screenshotFileName);
+        return { entry, persisted: false };
+      }
+      this.#cleanupOrphans();
+      return { entry, persisted: true };
+    } catch (error) {
+      try { rmSync(temporaryPath, { force: true }); } catch { /* best effort */ }
+      this.#removeScreenshot(screenshotFileName);
+      throw error;
+    }
+  }
+
+  getContextSummaries(input: {
+    readonly petId: string;
+    readonly now?: number;
+    readonly limit?: number;
+  }): readonly VisionContextSummary[] {
+    assertSafeCompanionPetId(input.petId);
+    const now = input.now ?? Date.now();
+    this.prune(now);
+    const limit = Math.max(0, Math.min(8, Math.floor(input.limit ?? 4)));
+    if (limit === 0) return [];
+    return this.#entries
+      .filter((entry) => entry.petId === input.petId)
+      .slice(-limit)
+      .map((entry) => ({
+        id: entry.id,
+        capturedAt: entry.capturedAt,
+        summaryText: entry.summaryText,
+        ...(entry.displayLabel ? { displayLabel: entry.displayLabel } : {}),
+      }));
+  }
+
+  getRecentInspectionScreens(input: {
+    readonly petId: string;
+    readonly now?: number;
+    readonly maxAgeMs?: number;
+    readonly limit?: number;
+    readonly maxTotalBytes?: number;
+  }): readonly VisionInspectionScreen[] {
+    assertSafeCompanionPetId(input.petId);
+    const now = normalizeTimestamp(input.now ?? Date.now());
+    this.prune(now);
+    const maxAgeMs = Math.max(0, Math.min(visionRetentionMs, Math.floor(input.maxAgeMs ?? 30 * 60_000)));
+    const limit = Math.max(0, Math.min(4, Math.floor(input.limit ?? 4)));
+    const maxTotalBytes = Math.max(0, Math.min(4 * 1_024 * 1_024, Math.floor(input.maxTotalBytes ?? 4 * 1_024 * 1_024)));
+    if (limit === 0 || maxTotalBytes === 0) return [];
+
+    const recent = this.#entries.filter((entry) =>
+      entry.petId === input.petId
+      && entry.capturedAt >= now - maxAgeMs
+      && entry.capturedAt <= now + maxFutureSkewMs
+    );
+    const newest = recent.at(-1);
+    if (!newest) return [];
+    const group = newest.captureGroupId
+      ? recent.filter((entry) => entry.captureGroupId === newest.captureGroupId)
+      : recent.filter((entry) => entry.capturedAt === newest.capturedAt);
+    group.sort((left, right) =>
+      Number(right.primaryDisplay === true) - Number(left.primaryDisplay === true)
+      || (left.displayBounds?.x ?? 0) - (right.displayBounds?.x ?? 0)
+      || (left.displayBounds?.y ?? 0) - (right.displayBounds?.y ?? 0)
+      || (left.displayLabel ?? left.id).localeCompare(right.displayLabel ?? right.id)
+    );
+
+    const screens: VisionInspectionScreen[] = [];
+    let totalBytes = 0;
+    for (const entry of group) {
+      if (screens.length >= limit || totalBytes + entry.screenshotBytes > maxTotalBytes) continue;
+      try {
+        const bytes = readFileSync(join(this.screenshotsDirectory, entry.screenshotFileName));
+        if (bytes.byteLength !== entry.screenshotBytes || bytes.byteLength <= 0 || bytes.byteLength > maxVisionScreenshotBytes) continue;
+        totalBytes += bytes.byteLength;
+        screens.push({
+          id: entry.id,
+          capturedAt: entry.capturedAt,
+          ...(entry.displayId ? { displayId: entry.displayId } : {}),
+          ...(entry.displayLabel ? { displayLabel: entry.displayLabel } : {}),
+          ...(entry.displayBounds ? { displayBounds: { ...entry.displayBounds } } : {}),
+          ...(typeof entry.primaryDisplay === "boolean" ? { primaryDisplay: entry.primaryDisplay } : {}),
+          mimeType: entry.mimeType,
+          image: Uint8Array.from(bytes),
+        });
+      } catch {
+        // A missing or unreadable retained image is skipped without exposing its path.
+      }
+    }
+    return screens;
+  }
+
+  prune(now = Date.now()): VisionStoreSnapshot {
+    const normalizedNow = normalizeTimestamp(now);
+    const previousFiles = new Map(this.#entries.map((entry) => [entry.id, entry.screenshotFileName]));
+    const next = this.#normalizeEntries(this.#entries, normalizedNow);
+    const nextIds = new Set(next.map((entry) => entry.id));
+    this.#entries = next;
+    for (const [id, fileName] of previousFiles) {
+      if (!nextIds.has(id)) this.#removeScreenshot(fileName);
+    }
+    this.#cleanupOrphans();
+    this.#cleanupIndexTemps();
+    this.#lastPurgeAt = normalizedNow;
+    this.#persist();
+    return this.#snapshotWithoutPrune();
+  }
+
+  deleteAll(): VisionStoreSnapshot {
+    this.#entries = [];
+    this.#deleteError = false;
+    try {
+      rmSync(this.screenshotsDirectory, { recursive: true, force: true });
+      mkdirSync(this.screenshotsDirectory, { recursive: true, mode: 0o700 });
+    } catch {
+      this.#deleteError = true;
+    }
+    this.#cleanupIndexTemps();
+    this.#persist();
+    return this.#snapshotWithoutPrune();
+  }
+
+  deleteCaptureGroup(captureGroupId: string): { readonly removed: number; readonly persisted: boolean } {
+    if (!safeEntryIdPattern.test(captureGroupId)) throw new Error("Invalid Vision capture group id.");
+    const removedEntries = this.#entries.filter((entry) => entry.captureGroupId === captureGroupId);
+    if (removedEntries.length === 0) return { removed: 0, persisted: this.#persisted };
+    const previous = this.#entries;
+    this.#entries = previous.filter((entry) => entry.captureGroupId !== captureGroupId);
+    if (!this.#persist()) {
+      // Keep the incomplete group inaccessible in memory even if the index
+      // rewrite failed. Removing its files also prevents the stale on-disk
+      // index from resurrecting a partial group after restart.
+      for (const entry of removedEntries) this.#removeScreenshot(entry.screenshotFileName);
+      this.#cleanupOrphans();
+      return { removed: removedEntries.length, persisted: false };
+    }
+    for (const entry of removedEntries) this.#removeScreenshot(entry.screenshotFileName);
+    this.#cleanupOrphans();
+    return { removed: removedEntries.length, persisted: true };
+  }
+
+  #snapshotWithoutPrune(): VisionStoreSnapshot {
+    const screenshotBytes = this.#entries.reduce((total, entry) => total + entry.screenshotBytes, 0);
+    return {
+      version: 1,
+      entries: this.#entries.map((entry) => ({ ...entry })),
+      screenshotBytes,
+      ...(this.#entries[0] ? { oldestAt: this.#entries[0].capturedAt } : {}),
+      ...(this.#entries.at(-1) ? { newestAt: this.#entries.at(-1)!.capturedAt } : {}),
+      ...(this.#lastPurgeAt === undefined ? {} : { lastPurgeAt: this.#lastPurgeAt }),
+      deleteError: this.#deleteError,
+      persisted: this.#persisted,
+    };
+  }
+
+  #readEntries(): VisionStoredEntry[] {
+    try {
+      if (!existsSync(this.indexPath) || statSync(this.indexPath).size > maxVisionIndexBytes) return [];
+      const parsed = JSON.parse(readFileSync(this.indexPath, "utf8")) as unknown;
+      if (!isRecord(parsed) || !Array.isArray(parsed.entries)) return [];
+      return this.#normalizeEntries(parsed.entries, Date.now());
+    } catch {
+      return [];
+    }
+  }
+
+  #normalizeEntries(value: readonly unknown[], now: number): VisionStoredEntry[] {
+    const cutoff = now - visionRetentionMs;
+    const futureLimit = now + maxFutureSkewMs;
+    const candidates: VisionStoredEntry[] = [];
+
+    for (const item of value) {
+      if (!isRecord(item)
+        || typeof item.id !== "string"
+        || !safeEntryIdPattern.test(item.id)
+        || typeof item.petId !== "string"
+        || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(item.petId)
+        || typeof item.capturedAt !== "number"
+        || !Number.isFinite(item.capturedAt)
+        || typeof item.screenshotFileName !== "string"
+        || typeof item.summaryCreatedAt !== "number"
+        || !Number.isFinite(item.summaryCreatedAt)
+        || typeof item.provider !== "string"
+        || !providers.has(item.provider as AiBrainProviderKind)) continue;
+      const mimeType = item.mimeType === "image/jpeg" && item.screenshotFileName === `${item.id}.jpg`
+        ? "image/jpeg" as const
+        : (item.mimeType === "image/png" || item.mimeType === undefined) && item.screenshotFileName === `${item.id}.png`
+          ? "image/png" as const
+          : undefined;
+      if (!mimeType) continue;
+      const capturedAt = Math.floor(item.capturedAt);
+      if (capturedAt < cutoff || capturedAt > futureLimit) continue;
+      const summaryText = normalizeSummary(item.summaryText);
+      const screenshotPath = join(this.screenshotsDirectory, item.screenshotFileName);
+      if (!summaryText || basename(screenshotPath) !== item.screenshotFileName || !existsSync(screenshotPath)) continue;
+      let screenshotBytes = 0;
+      try { screenshotBytes = statSync(screenshotPath).size; } catch { continue; }
+      if (screenshotBytes <= 0 || screenshotBytes > maxVisionScreenshotBytes) continue;
+      candidates.push({
+        id: item.id,
+        petId: item.petId,
+        ...(typeof item.captureGroupId === "string" && safeEntryIdPattern.test(item.captureGroupId)
+          ? { captureGroupId: item.captureGroupId }
+          : {}),
+        capturedAt,
+        expiresAt: capturedAt + visionRetentionMs,
+        ...(normalizeDisplayId(item.displayId) ? { displayId: normalizeDisplayId(item.displayId) } : {}),
+        ...(normalizeDisplayLabel(item.displayLabel) ? { displayLabel: normalizeDisplayLabel(item.displayLabel) } : {}),
+        ...(normalizeDisplayBounds(item.displayBounds) ? { displayBounds: normalizeDisplayBounds(item.displayBounds) } : {}),
+        ...(typeof item.primaryDisplay === "boolean" ? { primaryDisplay: item.primaryDisplay } : {}),
+        screenshotFileName: item.screenshotFileName,
+        screenshotBytes,
+        mimeType,
+        summaryText,
+        summaryCreatedAt: Math.floor(item.summaryCreatedAt),
+        provider: item.provider as AiBrainProviderKind,
+        model: normalizeModel(item.model),
+      });
+    }
+
+    candidates.sort((left, right) => left.capturedAt - right.capturedAt || left.id.localeCompare(right.id));
+    const kept: VisionStoredEntry[] = [];
+    let totalBytes = 0;
+    for (let index = candidates.length - 1; index >= 0; index -= 1) {
+      const entry = candidates[index]!;
+      if (kept.length >= maxVisionEntries || totalBytes + entry.screenshotBytes > maxVisionRetainedScreenshotBytes) continue;
+      kept.push(entry);
+      totalBytes += entry.screenshotBytes;
+    }
+    kept.reverse();
+    return kept;
+  }
+
+  #cleanupIndexTemps(): void {
+    let names: string[] = [];
+    try { names = readdirSync(this.storageDirectory); } catch { return; }
+    for (const name of names) {
+      if (!visionIndexTempPattern.test(name)) continue;
+      try {
+        rmSync(join(this.storageDirectory, name), { force: true });
+      } catch {
+        this.#deleteError = true;
+      }
+    }
+  }
+
+  #cleanupOrphans(): void {
+    const retained = new Set(this.#entries.map((entry) => entry.screenshotFileName));
+    let names: string[] = [];
+    try { names = readdirSync(this.screenshotsDirectory); } catch { return; }
+    for (const name of names) {
+      if (!retained.has(name)) this.#removeOrphan(name);
+    }
+  }
+
+  #removeOrphan(name: string): void {
+    if (!name || name === "." || name === ".." || basename(name) !== name) return;
+    try {
+      rmSync(join(this.screenshotsDirectory, name), { recursive: true, force: true });
+    } catch {
+      this.#deleteError = true;
+    }
+  }
+
+  #removeScreenshot(fileName: string): void {
+    if (!/^[A-Za-z0-9._:-]{1,120}\.(?:png|jpg)$/.test(fileName)) return;
+    try {
+      rmSync(join(this.screenshotsDirectory, fileName), { force: true });
+    } catch {
+      this.#deleteError = true;
+    }
+  }
+
+  #persist(): boolean {
+    const temporaryPath = `${this.indexPath}.${process.pid}.tmp`;
+    try {
+      mkdirSync(this.storageDirectory, { recursive: true, mode: 0o700 });
+      const serialized = `${JSON.stringify({ version: 1, entries: this.#entries }, null, 2)}\n`;
+      if (Buffer.byteLength(serialized, "utf8") > maxVisionIndexBytes) {
+        this.#persisted = false;
+        return false;
+      }
+      writeFileSync(temporaryPath, serialized, { encoding: "utf8", mode: 0o600 });
+      renameSync(temporaryPath, this.indexPath);
+      this.#persisted = true;
+      return true;
+    } catch {
+      try { rmSync(temporaryPath, { force: true }); } catch { /* best effort */ }
+      this.#persisted = false;
+      return false;
+    }
+  }
+}
+
+export function initializeVisionStore(userDataPath: string, now = Date.now()): VisionStore {
+  return new VisionStore(userDataPath, now);
+}
+
+function normalizeSummary(value: unknown): string {
+  return typeof value === "string"
+    ? value.replace(/\0/g, "").replace(/\s+/g, " ").trim().slice(0, maxVisionSummaryCharacters)
+    : "";
+}
+
+function normalizeModel(value: unknown): string {
+  return typeof value === "string" ? value.replace(/\0/g, "").trim().slice(0, 120) : "";
+}
+
+function normalizeDisplayId(value: unknown): string {
+  return typeof value === "string" ? value.replace(/\0/g, "").trim().slice(0, 120) : "";
+}
+
+function normalizeDisplayLabel(value: unknown): string {
+  return typeof value === "string" ? value.replace(/\0/g, "").replace(/\s+/g, " ").trim().slice(0, 80) : "";
+}
+
+function normalizeDisplayBounds(value: unknown): VisionDisplayBounds | undefined {
+  if (!isRecord(value)) return undefined;
+  const numbers = [value.x, value.y, value.width, value.height];
+  if (!numbers.every((part) => typeof part === "number" && Number.isFinite(part))) return undefined;
+  const [x, y, width, height] = numbers as [number, number, number, number];
+  if (width <= 0 || height <= 0) return undefined;
+  return {
+    x: Math.floor(x),
+    y: Math.floor(y),
+    width: Math.floor(width),
+    height: Math.floor(height),
+  };
+}
+
+function normalizeTimestamp(value: number): number {
+  if (!Number.isFinite(value)) throw new Error("Invalid Vision timestamp.");
+  return Math.floor(value);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}

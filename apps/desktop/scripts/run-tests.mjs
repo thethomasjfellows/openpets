@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env node
+#!/usr/bin/env node
 /**
  * Desktop test runner
  * Runs preload checks, builds and runs behavior tests, contract tests, then remaining dist checks.
@@ -11,7 +11,7 @@ import { dirname, join } from "node:path";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = join(__dirname, "..");
 
-const preloadChecks = ["control-center-preload.cjs", "pet-preload.cjs", "plugin-sdk-preload.cjs", "panel-preload.cjs"];
+const preloadChecks = ["control-center-preload.cjs", "voice-capture-preload.cjs", "pet-preload.cjs", "plugin-sdk-preload.cjs", "panel-preload.cjs"];
 const behaviorTests = [
   ".test-dist/tests/lease-manager.test.js",
   ".test-dist/tests/lease-manager-fixes.test.js",
@@ -21,21 +21,64 @@ const behaviorTests = [
   ".test-dist/tests/lan-client-retry.test.js",
   ".test-dist/tests/lan-persistence.test.js",
   ".test-dist/tests/default-pet-external-show.test.js",
+  ".test-dist/tests/pet-presentation-ownership.test.js",
+  ".test-dist/tests/codex-reaction-preferences.test.js",
+  ".test-dist/tests/bubble-tts.test.js",
+  ".test-dist/tests/host-ai-settings.test.js",
+  ".test-dist/tests/host-ai-gateway.test.js",
+  ".test-dist/tests/vision-settings.test.js",
+  ".test-dist/tests/vision-ai-router.test.js",
+  ".test-dist/tests/vision-store.test.js",
+  ".test-dist/tests/vision-service.test.js",
+  ".test-dist/tests/companion-settings.test.js",
+  ".test-dist/tests/companion-character-generation.test.js",
+  ".test-dist/tests/companion-memory.test.js",
+  ".test-dist/tests/companion-context.test.js",
+  ".test-dist/tests/companion-time-proactivity.test.js",
+  ".test-dist/tests/companion-orchestrator.test.js",
+  ".test-dist/tests/voice-settings.test.js",
+  ".test-dist/tests/voice-transcription-settings.test.js",
+  ".test-dist/tests/desktop-permissions.test.js",
+  ".test-dist/tests/pockettts-settings.test.js",
+  ".test-dist/tests/voice-output-resolver.test.js",
+  ".test-dist/tests/voice-caption-timing.test.js",
+  ".test-dist/tests/voice-lifecycle.test.js",
+  ".test-dist/tests/voice-provider-response.test.js",
+  ".test-dist/tests/voice-conversation-target.test.js",
+  ".test-dist/tests/voice-conversation-shortcut.test.js",
+  ".test-dist/tests/voice-capture-start-guard.test.js",
+  ".test-dist/tests/voice-capture-pcm.test.js",
+  ".test-dist/tests/voice-capture-preload.test.js",
+  ".test-dist/tests/voice-capture-worklet.test.js",
+  ".test-dist/tests/voice-audio.test.js",
+  ".test-dist/tests/voice-wake-helper-protocol.test.js",
+  ".test-dist/tests/voice-wake-runtime-manifest.test.js",
+  ".test-dist/tests/voice-wake-livekit-manifest.test.js",
+  ".test-dist/tests/voice-wake-official-runtime.test.js",
+  ".test-dist/tests/voice-wake-smoke-attestation.test.js",
+  ".test-dist/tests/voice-wake-runtime-process.test.js",
+  ".test-dist/tests/voice-wake-activation.test.js",
+  ".test-dist/tests/voice-wake-calibration.test.js",
+  ".test-dist/tests/voice-wake-coordinator.test.js",
+  ".test-dist/tests/voice-wake-word.test.js",
   ".test-dist/tests/onboarding-state.test.js",
   ".test-dist/tests/update-version.test.js",
   ".test-dist/tests/reaction-animation-mapping.test.js",
   ".test-dist/tests/zip-safety.test.js",
   ".test-dist/tests/codex-pets.test.js",
+  ".test-dist/tests/codex-hook-review.test.js",
   ".test-dist/tests/claude-memory.test.js",
   ".test-dist/tests/plugin-config.test.js",
   ".test-dist/tests/plugin-assets.test.js",
   ".test-dist/tests/plugin-delivery.test.js",
+  ".test-dist/tests/companion-contributions.test.js",
   ".test-dist/tests/plugin-state.test.js",
   ".test-dist/tests/plugin-runtime.test.js",
   ".test-dist/tests/plugin-catalog-validation.test.js",
   ".test-dist/tests/plugin-package.test.js",
   ".test-dist/tests/plugin-service.test.js",
   ".test-dist/tests/plugin-bridge-fuzz.test.js",
+  ".test-dist/tests/plugin-sdk-bridge.test.js",
   ".test-dist/tests/pet-fallback-notify.test.js",
   ".test-dist/tests/pet-pool-order.test.js",
   ".test-dist/tests/pet-pool.test.js",
@@ -124,10 +167,10 @@ async function main() {
     await run("node", [check]);
   }
 
-  console.log("\nâœ“ All tests passed!");
+  console.log("\nOK: All tests passed.");
 }
 
 main().catch((err) => {
-  console.error("\nâœ— Test suite failed:", err.message);
+  console.error("\nERROR: Test suite failed:", err.message);
   process.exit(1);
 });

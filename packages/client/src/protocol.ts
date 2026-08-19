@@ -19,7 +19,9 @@ export const allowedReactions = [
 ] as const;
 
 export type OpenPetsReaction = typeof allowedReactions[number];
-export type OpenPetsIpcMethod = "hello" | "status" | "pets.list" | "pets.install" | "lease.acquire" | "lease.heartbeat" | "lease.release" | "pet.react" | "pet.say" | "pet.showMedia" | "pets.install-local";
+export const allowedIntegrationLifecycles = ["thinking", "working", "editing", "testing", "waiting", "success", "error"] as const;
+export type OpenPetsIntegrationLifecycle = typeof allowedIntegrationLifecycles[number];
+export type OpenPetsIpcMethod = "hello" | "status" | "pets.list" | "pets.install" | "lease.acquire" | "lease.heartbeat" | "lease.release" | "pet.react" | "pet.say" | "pet.showMedia" | "pets.install-local" | "integration.event";
 
 export interface OpenPetsIpcRequest {
   readonly id: string;
@@ -66,6 +68,13 @@ export function validateReaction(value: string): OpenPetsReaction {
     throw new OpenPetsClientError("invalid_reaction", "Invalid OpenPets reaction.");
   }
   return value as OpenPetsReaction;
+}
+
+export function validateIntegrationLifecycle(value: string): OpenPetsIntegrationLifecycle {
+  if (!allowedIntegrationLifecycles.includes(value as OpenPetsIntegrationLifecycle)) {
+    throw new OpenPetsClientError("invalid_integration_event", "Invalid OpenPets integration lifecycle.");
+  }
+  return value as OpenPetsIntegrationLifecycle;
 }
 
 export class OpenPetsClientError extends Error {

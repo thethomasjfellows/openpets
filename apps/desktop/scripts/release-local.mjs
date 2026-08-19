@@ -46,11 +46,15 @@ function main() {
     run("pnpm", ["--filter", "@open-pets/desktop", "check"], { cwd: repoRoot });
   }
 
+  const buildPlan = createBuildPlan();
+  prepareReleaseWakeBundles(buildPlan);
   run("node", ["scripts/clean-package-output.cjs"], { cwd: desktopDir });
   mkdirSync(outputDir, { recursive: true });
 
-  for (const build of createBuildPlan()) {
+  for (const build of buildPlan) {
+    stageWakeBundle(build.wakeTarget);
     run("pnpm", ["exec", "electron-builder", ...build.args, "--publish", "never"], { cwd: desktopDir });
+    validatePackagedWakeTarget(build.wakeTarget);
   }
 
   const postBuildStatus = getGitStatusIgnoringPackageOutput();
@@ -116,21 +120,65 @@ function preflight() {
 
 function createBuildPlan() {
   const plan = [
-    { name: "mac dmg x64+arm64", args: ["--mac", "dmg", "--x64", "--arm64"] },
-    { name: "mac zip x64+arm64", args: ["--mac", "zip", "--x64", "--arm64"] },
-    { name: "windows nsis x64", args: ["--win", "nsis", "--x64"] },
-    { name: "linux AppImage x64", args: ["--linux", "AppImage", "--x64"] },
-    { name: "linux deb x64", args: ["--linux", "deb", "--x64"] },
-    { name: "linux rpm x64", args: ["--linux", "rpm", "--x64"] },
-    { name: "linux tar.gz x64", args: ["--linux", "tar.gz", "--x64"] },
+    { name: "mac dmg x64", wakeTarget: "darwin-x64", args: ["--mac", "dmg", "--x64"] },
+    { name: "mac dmg arm64", wakeTarget: "darwin-arm64", args: ["--mac", "dmg", "--arm64"] },
+    { name: "mac zip x64", wakeTarget: "darwin-x64", args: ["--mac", "zip", "--x64"] },
+    { name: "mac zip arm64", wakeTarget: "darwin-arm64", args: ["--mac", "zip", "--arm64"] },
+    { name: "windows nsis x64", wakeTarget: "win32-x64", args: ["--win", "nsis", "--x64"] },
+    { name: "linux AppImage x64", wakeTarget: "linux-x64", args: ["--linux", "AppImage", "--x64"] },
+    { name: "linux deb x64", wakeTarget: "linux-x64", args: ["--linux", "deb", "--x64"] },
+    { name: "linux rpm x64", wakeTarget: "linux-x64", args: ["--linux", "rpm", "--x64"] },
+    { name: "linux tar.gz x64", wakeTarget: "linux-x64", args: ["--linux", "tar.gz", "--x64"] },
   ];
   if (includeExperimentalArm) {
-    plan.push({ name: "windows nsis arm64", args: ["--win", "nsis", "--arm64"] });
-    plan.push({ name: "linux AppImage arm64", args: ["--linux", "AppImage", "--arm64"] });
+    plan.push({ name: "windows nsis arm64", wakeTarget: "win32-arm64", args: ["--win", "nsis", "--arm64"] });
+    plan.push({ name: "linux AppImage arm64", wakeTarget: "linux-arm64", args: ["--linux", "AppImage", "--arm64"] });
   }
   console.log("Build plan:");
   for (const build of plan) console.log(`- ${build.name}`);
   return plan;
+}
+
+function prepareReleaseWakeBundles(buildPlan) {
+  const targets = [...new Set(buildPlan.map((build) => build.wakeTarget))];
+  for (const target of targets) {
+    if (target.startsWith("darwin-")) {
+      run("node", ["wake-helper/scripts/prepare-bundle.mjs", "--target", target], { cwd: desktopDir });
+      run("node", ["wake-helper/scripts/smoke-test.mjs", "--target", target], { cwd: desktopDir });
+    }
+    stageWakeBundle(target);
+  }
+}
+
+function stageWakeBundle(target) {
+  run("node", ["wake-helper/scripts/stage-package-resource.mjs", "--target", target], { cwd: desktopDir });
+}
+
+function validatePackagedWakeTarget(target) {
+  run("node", [
+    "dist/check-packaging-contract.js",
+    "--wake-resource",
+    packagedResourceDir(target),
+    "--wake-target",
+    target,
+  ], { cwd: desktopDir });
+}
+
+function packagedResourceDir(target) {
+  const [platform, arch] = target.split("-");
+  if (platform === "darwin") {
+    const appOutput = arch === "arm64" ? "mac-arm64" : "mac";
+    return join(outputDir, appOutput, "openpets.app", "Contents", "Resources");
+  }
+  if (platform === "win32") {
+    const appOutput = arch === "arm64" ? "win-arm64-unpacked" : "win-unpacked";
+    return join(outputDir, appOutput, "resources");
+  }
+  if (platform === "linux") {
+    const appOutput = arch === "arm64" ? "linux-arm64-unpacked" : "linux-unpacked";
+    return join(outputDir, appOutput, "resources");
+  }
+  throw new Error(`Unsupported packaged wake target: ${target}`);
 }
 
 function collectArtifacts(dir) {

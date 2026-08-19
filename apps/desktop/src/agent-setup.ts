@@ -1,18 +1,21 @@
 import { spawn } from "node:child_process";
-import { constants, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync, accessSync } from "node:fs";
+import { constants, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, accessSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import { createRequire } from "node:module";
 
 import { app } from "electron";
 import { buildClaudeMcpGetCommand, buildClaudeMcpPreview, classifyClaudeMcpStatus, createOpenPetsHookSettingsPreview, doctorClaudeHooks, installClaudeHooks, mapAsarPathToUnpacked, uninstallClaudeHooks, type ClaudeCommandSpec, type ClaudeHookDoctorResult, type ClaudeMcpPreview, type OpenPetsCommandMode, type ParsedClaudeMcpEntry } from "@open-pets/claude";
+import { disconnectCodexIntegration, doctorCodexIntegration, installCodexIntegration, repairCodexIntegration, type CodexActionResult, type CodexCommandRunner, type CodexIntegrationOptions, type CodexIntegrationSnapshot } from "@open-pets/codex";
 import { buildCursorRulesPreview, classifyCursorMcpStatus, executeCursorMcpWrite, getCursorGlobalMcpPath, planCursorMcpInstall, planCursorMcpRemove, planCursorMcpReplace, readCursorMcpConfig, type CursorMcpStatusResult } from "@open-pets/cursor";
 import { buildOpenPetsOnlyPreview, type RedactedPreview } from "@open-pets/cursor";
 import { doctorOpenCodeGlobalSetup, getGlobalOpenCodeConfigDir, parseOpenCodeConfig, prepareOpenCodeGlobalRemove, prepareOpenCodeGlobalSetup, writePreparedOpenCodeGlobalRemove, writePreparedOpenCodeGlobalSetup } from "@open-pets/opencode";
 
 import { getAppStateSnapshot, updatePreferences, type InstalledPetState, type OpenPetsStateV1 } from "./app-state.js";
 import { doctorClaudeOpenPetsMemory, installClaudeOpenPetsMemory, uninstallClaudeOpenPetsMemory, type ClaudeOpenPetsMemoryStatus } from "./claude-memory.js";
+import { buildCodexHookReviewCommandFile, createCodexHookReviewLaunchPlans, type CodexHookReviewLaunchPlan } from "./codex-hook-review.js";
+import { info, warn } from "./logger.js";
 
-export type AgentSetupAction = "configure" | "replace" | "remove" | "install-memory" | "doctor-hooks" | "install-hooks" | "uninstall-hooks" | "opencode-install" | "opencode-remove" | "cursor-install" | "cursor-replace" | "cursor-remove";
+export type AgentSetupAction = "configure" | "replace" | "remove" | "install-memory" | "doctor-hooks" | "install-hooks" | "uninstall-hooks" | "opencode-install" | "opencode-remove" | "cursor-install" | "cursor-replace" | "cursor-remove" | "codex-install" | "codex-repair" | "codex-disconnect" | "codex-refresh";
 export type JournalAction = "configure" | "update" | "replace" | "remove";
 
 export interface AgentSetupPetOption {
@@ -47,6 +50,9 @@ export interface AgentSetupSnapshot {
   readonly opencodePreview: OpenCodeSetupPreview;
   readonly cursorStatus: CursorSetupStatus;
   readonly cursorPreview: CursorSetupPreview;
+  readonly codexStatus: CodexIntegrationSnapshot;
+  readonly codexLastEvent?: OpenPetsStateV1["integrations"]["codex"]["lastEvent"];
+  readonly codexReactionPreferences: OpenPetsStateV1["integrations"]["codex"]["reactionPreferences"];
   readonly commandPaths: AgentSetupCommandPaths;
   readonly busy: boolean;
   readonly lastAction?: AgentSetupActionResult;
@@ -54,6 +60,7 @@ export interface AgentSetupSnapshot {
 
 export interface AgentSetupCommandPaths {
   readonly claude: string;
+  readonly codex: string;
   readonly node: string;
   readonly opencode: string;
 }
@@ -104,6 +111,11 @@ export interface AgentSetupActionResult {
   readonly changed: boolean;
 }
 
+export interface CodexHookReviewLaunchResult {
+  readonly ok: boolean;
+  readonly message: string;
+}
+
 export interface AgentSetupJournalEntry {
   readonly timestamp: string;
   readonly action: JournalAction;
@@ -124,10 +136,12 @@ interface CommandResult {
 }
 
 const commandTimeoutMs = 6_000;
+const codexCommandTimeoutMs = 20_000;
 const maxOutputBytes = 16_384;
 const require = createRequire(import.meta.url);
 let operationRunning = false;
 let lastAction: AgentSetupActionResult | undefined;
+let automaticCodexMigration: Promise<CodexIntegrationSnapshot> | undefined;
 
 export async function getAgentSetupSnapshot(selectedPetId?: unknown, commandModeInput?: unknown): Promise<AgentSetupSnapshot> {
   const petId = validateSelectedPetId(selectedPetId);
@@ -140,6 +154,8 @@ export async function getAgentSetupSnapshot(selectedPetId?: unknown, commandMode
   const memoryStatus = { ...rawMemoryStatus, claudeMdPath: formatUserPath(rawMemoryStatus.claudeMdPath) ?? rawMemoryStatus.claudeMdPath, openPetsMemoryPath: formatUserPath(rawMemoryStatus.openPetsMemoryPath) ?? rawMemoryStatus.openPetsMemoryPath };
   const opencode = await getOpenCodeSetup(commandMode, petId);
   const cursor = await getCursorSetup(commandMode, petId);
+  const codexStatus = await getCodexStatusWithAutomaticMigration();
+  const appState = getAppStateSnapshot();
 
   return {
     selectedPetId: petId,
@@ -154,19 +170,82 @@ export async function getAgentSetupSnapshot(selectedPetId?: unknown, commandMode
     opencodePreview: opencode.preview,
     cursorStatus: cursor.status,
     cursorPreview: cursor.preview,
+    codexStatus,
+    codexLastEvent: appState.integrations.codex.lastEvent,
+    codexReactionPreferences: appState.integrations.codex.reactionPreferences,
     commandPaths: getAgentSetupCommandPaths(),
     busy: operationRunning,
     lastAction,
   };
 }
 
+export async function getCodexIntegrationStatus(): Promise<CodexIntegrationSnapshot> {
+  return getCodexStatusWithAutomaticMigration();
+}
+
+export async function launchCodexHookReview(): Promise<CodexHookReviewLaunchResult> {
+  const status = await doctorCodexIntegration(getCodexIntegrationOptions());
+  if (status.state === "connected") return { ok: true, message: "Codex hooks are already approved." };
+  if (status.state !== "waiting_for_trust") return { ok: false, message: status.message };
+
+  const env = createCommandEnv();
+  const macCommandFile = process.platform === "darwin" ? join(app.getPath("temp"), `openpets-codex-review-${process.pid}-${Date.now()}.command`) : undefined;
+  if (macCommandFile) {
+    try {
+      writeFileSync(macCommandFile, buildCodexHookReviewCommandFile({
+        codexCommand: getPreferredCodexCommand(),
+        home: app.getPath("home"),
+        path: env.PATH ?? "",
+        commandFile: macCommandFile,
+      }), { encoding: "utf8", mode: 0o700, flag: "wx" });
+    } catch {
+      warn("app", "codex hook review command file could not be created");
+      return { ok: false, message: "OpenPets couldn't open a terminal. Open Terminal, run codex, then choose Review when prompted or type /hooks inside Codex." };
+    }
+  }
+  const plans = createCodexHookReviewLaunchPlans({
+    platform: process.platform,
+    codexCommand: getPreferredCodexCommand(),
+    home: app.getPath("home"),
+    path: env.PATH ?? "",
+    macCommandFile,
+    terminal: process.env.TERMINAL,
+    windowsComSpec: process.env.ComSpec,
+    windowsPowerShell: process.platform === "win32" ? join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe") : undefined,
+  });
+  for (const plan of plans) {
+    if (await launchCodexHookReviewPlan(plan, env)) {
+      if (macCommandFile) scheduleCommandFileCleanup(macCommandFile);
+      info("app", "codex hook review terminal opened", { platform: process.platform });
+      return { ok: true, message: "Opened the Codex CLI. Review the pending OpenPets hooks there; OpenPets will detect approval automatically." };
+    }
+  }
+
+  if (macCommandFile) removeCommandFile(macCommandFile);
+  warn("app", "codex hook review terminal could not be opened", { platform: process.platform });
+  return { ok: false, message: "OpenPets couldn't open a terminal. Open Terminal, run codex, then choose Review when prompted or type /hooks inside Codex." };
+}
+
+function scheduleCommandFileCleanup(path: string): void {
+  setTimeout(() => removeCommandFile(path), 60_000).unref();
+}
+
+function removeCommandFile(path: string): void {
+  try {
+    unlinkSync(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") warn("app", "codex hook review command file cleanup failed");
+  }
+}
+
 export function updateAgentSetupCommandPaths(patch: unknown): AgentSetupCommandPaths {
   if (!isRecord(patch)) throw new Error("Invalid command path settings.");
   for (const key of Object.keys(patch)) {
-    if (key !== "claude" && key !== "node" && key !== "opencode") throw new Error("Invalid command path setting.");
+    if (key !== "claude" && key !== "codex" && key !== "node" && key !== "opencode") throw new Error("Invalid command path setting.");
   }
   const updates: Writable<Partial<OpenPetsStateV1["preferences"]>> = {};
   if ("claude" in patch) updates.claudeCommandPath = normalizeOptionalCommandPath(patch.claude, "Claude");
+  if ("codex" in patch) updates.codexCommandPath = normalizeOptionalCommandPath(patch.codex, "Codex");
   if ("node" in patch) updates.nodeCommandPath = normalizeOptionalCommandPath(patch.node, "Node.js");
   if ("opencode" in patch) updates.opencodeCommandPath = normalizeOptionalCommandPath(patch.opencode, "OpenCode");
   updatePreferences(updates);
@@ -249,6 +328,7 @@ function createHookErrorStatus(message: string): ClaudeHookDoctorResult {
 }
 
 async function runAction(action: AgentSetupAction, selectedPetId: string | undefined, commandMode: OpenPetsCommandMode): Promise<AgentSetupActionResult> {
+  if (action.startsWith("codex-")) return runCodexSetupAction(action as Extract<AgentSetupAction, `codex-${string}`>);
   if (action === "opencode-install") return installOpenCodeGlobal(selectedPetId, commandMode);
   if (action === "opencode-remove") return removeOpenCodeGlobal();
   if (action === "cursor-install") return installCursorGlobal(selectedPetId, commandMode);
@@ -441,6 +521,7 @@ function getAgentSetupCommandPaths(): AgentSetupCommandPaths {
   const preferences = getAppStateSnapshot().preferences;
   return {
     claude: preferences.claudeCommandPath ?? "",
+    codex: preferences.codexCommandPath ?? "",
     node: preferences.nodeCommandPath ?? "",
     opencode: preferences.opencodeCommandPath ?? "",
   };
@@ -450,12 +531,87 @@ function getPreferredClaudeCommand(): string {
   return getAppStateSnapshot().preferences.claudeCommandPath || "claude";
 }
 
+function getPreferredCodexCommand(): string {
+  return getAppStateSnapshot().preferences.codexCommandPath || (process.platform === "win32" ? "codex.cmd" : "codex");
+}
+
 function getPreferredNodeCommand(): string {
   return getAppStateSnapshot().preferences.nodeCommandPath || "node";
 }
 
 function getPreferredOpenCodeCommand(): string {
   return getAppStateSnapshot().preferences.opencodeCommandPath || (process.platform === "win32" ? "opencode.cmd" : "opencode");
+}
+
+function getCodexIntegrationOptions(): CodexIntegrationOptions {
+  const codexEntry = mapAsarPathToUnpacked(require.resolve("@open-pets/codex"));
+  return {
+    codexCommand: getPreferredCodexCommand(),
+    nodeCommand: getPreferredNodeCommand(),
+    codexHome: join(app.getPath("home"), ".codex"),
+    hookCliPath: join(dirname(codexEntry), "cli.js"),
+    mcpEntryPath: mapAsarPathToUnpacked(require.resolve("@open-pets/mcp")),
+    runCommand: runCodexCommand,
+  };
+}
+
+const runCodexCommand: CodexCommandRunner = async (command, args, options) => {
+  // Codex status commands return JSON containing command paths. Keep that
+  // structured output intact for verification; only redact it at UI/log
+  // boundaries. Sanitizing here turns valid paths into "<path>" and makes a
+  // freshly installed integration look foreign, which triggers a rollback.
+  const result = await runCommand(
+    { command, args },
+    false,
+    options?.timeoutMs ?? codexCommandTimeoutMs,
+  );
+  return {
+    ok: result.ok,
+    status: result.exitCode,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    error: result.error,
+  };
+};
+
+async function getCodexStatusWithAutomaticMigration(): Promise<CodexIntegrationSnapshot> {
+  const status = await doctorCodexIntegration(getCodexIntegrationOptions());
+  if (!status.legacy.detected || !status.detected || !status.supported || status.state === "conflict") return formatCodexSnapshotForRenderer(status);
+  automaticCodexMigration ??= repairCodexIntegration(getCodexIntegrationOptions()).then((result) => result.snapshot);
+  return formatCodexSnapshotForRenderer(await automaticCodexMigration);
+}
+
+async function runCodexSetupAction(action: Extract<AgentSetupAction, `codex-${string}`>): Promise<AgentSetupActionResult> {
+  automaticCodexMigration = undefined;
+  info("app", "codex integration action started", { action });
+  let result: CodexActionResult;
+  if (action === "codex-install") result = await installCodexIntegration(getCodexIntegrationOptions());
+  else if (action === "codex-repair") result = await repairCodexIntegration(getCodexIntegrationOptions());
+  else if (action === "codex-disconnect") result = await disconnectCodexIntegration(getCodexIntegrationOptions());
+  else {
+    const snapshot = await doctorCodexIntegration(getCodexIntegrationOptions());
+    result = { ok: true, changed: false, message: snapshot.message, snapshot };
+  }
+  const fields = { action, ok: result.ok, changed: result.changed, state: result.snapshot.state };
+  if (result.ok) info("app", "codex integration action completed", fields);
+  else warn("app", "codex integration action failed", fields);
+  return { ok: result.ok, action, message: result.message, changed: result.changed };
+}
+
+function formatCodexSnapshotForRenderer(snapshot: CodexIntegrationSnapshot): CodexIntegrationSnapshot {
+  return {
+    ...snapshot,
+    location: formatUserPath(snapshot.location),
+    hooks: {
+      ...snapshot.hooks,
+      path: formatUserPath(snapshot.hooks.path) ?? snapshot.hooks.path,
+    },
+    managedChanges: snapshot.managedChanges.map((change) => ({
+      ...change,
+      path: formatUserPath(change.path) ?? change.path,
+      detail: sanitizeAgentSetupOutput(change.detail),
+    })),
+  };
 }
 
 function normalizeOptionalCommandPath(value: unknown, label: string): string | undefined {
@@ -737,7 +893,11 @@ async function runClaudeCommand(spec: ClaudeCommandSpec): Promise<CommandResult>
   return { ok: false, timedOut: false, exitCode: null, stdout: "", stderr: "", error: "Claude command was not found." };
 }
 
-function runCommand(spec: ClaudeCommandSpec): Promise<CommandResult> {
+function runCommand(
+  spec: ClaudeCommandSpec,
+  sanitizeOutput = true,
+  timeoutMs = commandTimeoutMs,
+): Promise<CommandResult> {
   return new Promise((resolve) => {
     const command = process.platform === "win32" && spec.command.toLowerCase().endsWith(".cmd") ? "cmd.exe" : spec.command;
     const args = process.platform === "win32" && spec.command.toLowerCase().endsWith(".cmd") ? ["/d", "/s", "/c", spec.command, ...spec.args] : spec.args;
@@ -755,8 +915,8 @@ function runCommand(spec: ClaudeCommandSpec): Promise<CommandResult> {
       if (settled) return;
       settled = true;
       child.kill();
-      resolve({ ok: false, timedOut: true, exitCode: null, stdout: sanitizeAgentSetupOutput(stdout), stderr: sanitizeAgentSetupOutput(stderr), error: "Command timed out." });
-    }, commandTimeoutMs);
+      resolve({ ok: false, timedOut: true, exitCode: null, stdout: sanitizeOutput ? sanitizeAgentSetupOutput(stdout) : stdout, stderr: sanitizeOutput ? sanitizeAgentSetupOutput(stderr) : stderr, error: "Command timed out." });
+    }, timeoutMs);
 
     child.stdout?.on("data", (chunk: Buffer) => { stdout = appendBounded(stdout, chunk.toString("utf8")); });
     child.stderr?.on("data", (chunk: Buffer) => { stderr = appendBounded(stderr, chunk.toString("utf8")); });
@@ -764,14 +924,51 @@ function runCommand(spec: ClaudeCommandSpec): Promise<CommandResult> {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve({ ok: false, timedOut: false, exitCode: null, stdout: sanitizeAgentSetupOutput(stdout), stderr: sanitizeAgentSetupOutput(stderr), error: error.message });
+      resolve({ ok: false, timedOut: false, exitCode: null, stdout: sanitizeOutput ? sanitizeAgentSetupOutput(stdout) : stdout, stderr: sanitizeOutput ? sanitizeAgentSetupOutput(stderr) : stderr, error: error.message });
     });
     child.on("close", (code) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve({ ok: code === 0, timedOut: false, exitCode: code, stdout: sanitizeAgentSetupOutput(stdout), stderr: sanitizeAgentSetupOutput(stderr), error: undefined });
+      resolve({ ok: code === 0, timedOut: false, exitCode: code, stdout: sanitizeOutput ? sanitizeAgentSetupOutput(stdout) : stdout, stderr: sanitizeOutput ? sanitizeAgentSetupOutput(stderr) : stderr, error: undefined });
     });
+  });
+}
+
+function launchCodexHookReviewPlan(plan: CodexHookReviewLaunchPlan, env: NodeJS.ProcessEnv): Promise<boolean> {
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawn(plan.command, [...plan.args], {
+        cwd: app.getPath("home"),
+        env,
+        detached: plan.detached,
+        stdio: "ignore",
+        windowsHide: plan.windowsHide,
+        shell: false,
+      });
+    } catch {
+      resolve(false);
+      return;
+    }
+
+    let settled = false;
+    let launchTimer: NodeJS.Timeout | undefined;
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      if (launchTimer) clearTimeout(launchTimer);
+      resolve(ok);
+    };
+    child.once("error", () => finish(false));
+    if (plan.waitForExit) child.once("close", (code) => finish(code === 0));
+    else child.once("spawn", () => {
+      launchTimer = setTimeout(() => {
+        child.unref();
+        finish(true);
+      }, 500);
+    });
+    if (!plan.waitForExit) child.once("close", (code) => finish(code === 0));
   });
 }
 

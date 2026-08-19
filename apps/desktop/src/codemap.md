@@ -55,8 +55,9 @@ pet-window.ts
 │   ├── reaction-animation-mapping.ts (resolveReactionSpriteState)
 │   ├── reaction-messages.ts (pickReactionMessage for bubbles)
 │   ├── i18n/reactions (localized reaction speech pools)
-│   └── Speech bubbles, alert indicators, pinned HUDs, and status reactions
-└── pet-preload.cjs (renderer IPC for drag/click-through)
+│   ├── Speech bubbles, alert indicators, pinned HUDs, and status reactions
+│   └── bubble-tts.ts → default-off, quiet-hours-aware presentation dedupe
+└── pet-preload.cjs (renderer IPC for drag/click-through and system TTS)
 
 Plugin motion APIs:
 plugin-sdk-bridge.ts → plugin-sdk-routes.ts → plugin-pet-registry.ts
@@ -67,6 +68,7 @@ plugin-sdk-bridge.ts → plugin-sdk-routes.ts → plugin-pet-registry.ts
 ```
 windows.ts (IPC handlers)
 └── agent-setup.ts
+    ├── codex-hook-review.ts (safe cross-platform interactive CLI launch plans)
     ├── detectClaudeCodeStatus() (claude --version, claude mcp list)
     ├── runAgentSetupAction()
     │   ├── configure/replace/remove (MCP commands)
@@ -96,6 +98,33 @@ tray.ts → openControlCenterWindow(route) → windows.ts
 └── renderer/src/main.tsx routes Dashboard/Pets/Integrations/Plugins/Settings
 ```
 
+**Companion + Voice Platform Flow**:
+```
+Pet details Companion panel / Voice Settings / pet bubbles / plugin context
+├── companion-settings.ts + companion-memory.ts → opt-in host settings, per-pet personality, rolling recent memory
+├── companion-orchestrator.ts → shared voice/proactive turn lifecycle, single-owner TTS, cancellation, display acknowledgement, memory commits
+│   ├── companion-context.ts → bounded provider-neutral personality/profile/time/memory/plugin/Vision prompt
+│   └── companion-target-* → Codex CLI or configured host-AI provider inference
+├── companion-proactive-service.ts + companion-proactivity.ts → time/goal/plugin candidates and bounded check-in policy
+├── companion-contributions.ts → consent-gated, expiring in-memory plugin facts/opportunities for the active default companion
+├── vision-settings.ts + vision-store.ts → separate fresh opt-in state and bounded rolling 24-hour local screenshot/summary storage
+├── vision-capture.ts + vision-service.ts + vision-ai-router.ts → Electron display capture, selected AI Brain image summarization, pause/power lifecycle, and Companion context/opportunities
+├── codex-ai-brain.ts + codex-command.ts + codex-model-selection.ts + voice-conversation-codex.ts → official Codex model discovery/ID resolution, constrained reasoning, empty private workspaces, isolated conversation resume, and ephemeral image analysis
+├── voice-settings.ts + voice-secrets.ts → normalized TTS/wake-calibration settings + encrypted key status
+├── codex-reaction-preferences.ts → persisted three-stage Codex lifecycle visibility policy (start, working, completed) with completion-only defaults
+├── pet-presentation-ownership.ts → short-lived voice-turn lease that prevents background agent reactions from replacing the active conversation bubble
+├── voice-wake-calibration-service.ts + voice-wake-calibration-collector.ts + voice-wake-calibration-normalization.ts → ten-sample local setup, bounded PCM/VAD collection, up to fifteen visible text alternatives, input-level diagnostics, and wake suspension/resume
+├── voice-transcription-settings.ts + voice-transcription-router.ts + voice-local-transcription.ts + voice-openai-transcription.ts → separate finite local-or-OpenAI post-wake speech recognition with explicit verified local-model install
+├── desktop-permissions*.ts → testable macOS microphone/screen permission state plus guarded Electron relaunch/quit adapter; renderer retains restart recovery after stale post-grant status
+├── voice-output-service.ts + voice-speech-text.ts + voice-caption-timing.ts → pet targeting, overlap, voice/provider fallbacks, clock-time pronunciation, and playback-driven progressive response captions
+│   └── voice-provider-* → System Voice, PocketTTS, OpenAI-compatible, ElevenLabs
+├── voice-capture.ts + voice-capture-core/worklet.ts → one global finite-WAV/PCM mic owner, sandboxed preload bridge, bounded 16 kHz frames + voice-privacy-indicator.ts
+├── voice-listening-service.ts → plugin-only one-shot capture, cues, transcription
+├── host-ai-settings.ts + host-ai-gateway.ts → versioned direct-provider profiles, provider-scoped credentials, health, and cancellable text/image inference
+├── pockettts-settings.ts + pockettts-service.ts → explicit pinned local-service install/start/stop state, loopback binding, warm-up, and built-in voices
+└── voice-wake-*.ts + voice-audio.ts → bundle-validated local wake coordinator, Sherpa manifest v2, NDJSON/f32le wire adapter, isolated helper lifecycle, bounded wake/follow-up turns, cancellation, and finite PCM-to-WAV
+```
+
 **Plugin Flow**:
 ```
 main.ts → initializePluginService(userData, defaultPluginPetApi, appVersion, ElectronPluginJsHost).start()
@@ -112,7 +141,8 @@ main.ts → initializePluginService(userData, defaultPluginPetApi, appVersion, E
 │       ├── plugin-sdk-bus.ts/plugin-sdk-events.ts → curated pub/sub and host event streams
 │       ├── plugin-sdk-config.ts/plugin-sdk-storage.ts/plugin-sdk-state.ts → config, persistent plugin data, and subscriptions
 │       ├── plugin-sdk-ui.ts/plugin-panels.ts/plugin-toast.ts → bubbles, alerts, commands, panels, and toasts
-│       ├── plugin-oauth.ts/plugin-secrets.ts/plugin-ai-gateway.ts → host-mediated auth, encrypted secrets, and AI gateway
+│       ├── plugin-oauth.ts/plugin-secrets.ts/host-ai-gateway.ts → host-mediated auth, encrypted secrets, and shared host AI gateway
+│       ├── companion-contributions.ts → bounded `companion:context` facts/opportunities under separate Companion consent
 │       └── plugin-pet-api.ts/plugin-pet-registry.ts/default-pet-controller → default/spawned pet actions
 ├── plugin-service.ts orchestrates UI actions, permission confirmation, config validation, install/update/uninstall/load-local, and runtime reloads
 └── lifecycle.ts → stopPluginService() on quit
@@ -161,36 +191,60 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 - **To System**:
   - File system: `app.getPath("userData")`, `userData/plugins/`, `userData/plugins-dev/`, plugin storage JSON, `~/.codex/pets/`, `~/.claude/`, `~/.opencode/`
   - Network: `fetch()` to openpets.dev, GitHub API, plugin catalog at `https://openpets.dev/plugins/catalog.v1.json`, plugin ZIPs restricted to `https://zip.openpets.dev/plugins/`
-  - Processes: `spawn()` for `claude`, `opencode`, `node`
+- Processes: `spawn()` for `claude`, `opencode`, `node`, and the validated current-platform Sherpa wake helper when Listen is enabled
 
 ## Key Modules
 
 **Core**:
-- `main.ts`: Entry, single-instance lock, bootstrap sequence, JavaScript plugin host construction
-- `lifecycle.ts`: App event handlers (quit, window-all-closed, second-instance) with logging; stops plugin service, IPC, and pet windows on quit
+- `main.ts`: Entry, single-instance lock, bootstrap sequence, JavaScript plugin host construction, and Vision/voice/Companion lifecycle wiring
+- `lifecycle.ts`: App event handlers with logging; second-instance/macOS activation opens the singleton Control Center, while quit stops Vision, voice, plugin service, IPC, and pet windows
 - `state.ts`: Simple shell pause state
-- `app-state.ts`: Persistent JSON state with V1 schema, atomic writes, reaction animation overrides
-- `app-state-core.ts`: Pet scale options, onboarding normalization
-- `logger.ts`: Structured logging with scopes (app, ipc, lease, pet.default, pet.agent, pet.window, state, tray, ui), log rotation, redaction
+- `app-state.ts`: Persistent JSON state with V1 schema, atomic writes, reaction animation overrides, and the speech-bubble narration preference
+- `app-state-core.ts`: Pet scale options plus onboarding and speech-bubble narration preference normalization
+- `logger.ts`: Structured logging with scopes (including bounded `companion`, `voice`, and `vision` diagnostics), log rotation, and redaction
 
 **UI**:
-- `tray.ts`: Tray icon (nativeImage), context menu builder, update status integration, route-targeted Control Center entries, logs folder
-- `windows.ts`: Control Center BrowserWindow factory, Dashboard snapshot, IPC handler registration, route targeting, reaction animation settings, plugin/integration/pet/settings UI IPC endpoints, and scoped internal protocols
-- `preference-patch.ts`: Pure validation of Control Center preference patches (`validatePreferencePatch`/`PreferencePatch`) for the `update-preferences` IPC path, including the `petCrossDisplayEnabled` toggle; consumed by `windows.ts`
+- `tray.ts`: Tray icon (nativeImage), context menu builder, update status integration, Vision pause/resume actions, route-targeted Control Center entries, logs folder
+- `windows.ts`: Control Center BrowserWindow factory, Dashboard snapshot, IPC handler registration, route targeting, Vision settings/health/pause endpoints, reaction animation settings, plugin/integration/pet/settings UI IPC endpoints, and scoped internal protocols
+- `preference-patch.ts`: Pure validation of Control Center preference patches (`validatePreferencePatch`/`PreferencePatch`) for the `update-preferences` IPC path, including display and speech-bubble narration toggles; consumed by `windows.ts`
 - `assets.ts`: Tray icon loading with generated fallback
 - `display.ts`: Screen geometry helpers, pet window positioning
 - `window-tracker-latch.ts`: Re-entrancy latch helper (`createLatchedTick`) that prevents overlapping async ticks from stacking; used by the window-tracking poller
 - `renderer/`: Vite React/Tailwind Control Center shell for Dashboard, Pets, Integrations, Plugins, and Settings.
 
 **Pets**:
-- `pet-window.ts`: Window creation (transparent, frameless, always-on-top), HTML/CSS generation, sprite animation states, speech bubbles, status badges, transient displays
-- `default-pet-controller.ts`: Default pet visibility, position persistence, transient reactions, status badges, logging
+- `pet-window.ts`: Window creation (transparent, frameless, always-on-top), HTML/CSS generation, sprite animation states, speech bubbles, status badges, transient displays, and isolated voice/system-TTS playback channels
+- `companion-settings.ts` / `companion-memory.ts`: Atomic opt-in preferences, minimal user profile, per-pet personality, and bounded rolling recent conversation memory.
+- `companion-orchestrator.ts` / `companion-context.ts`: Provider-independent turn lifecycle and prompt assembly with display-before-memory semantics plus bounded, summary-only Vision context.
+- `companion-proactive-service.ts` / `companion-proactivity.ts`: Visible default-pet time expression plus policy-limited time, goal, plugin, and Vision check-ins.
+- `companion-target-codex.ts` / `companion-target-host-ai.ts`: Thin inference adapters over the Codex CLI and host AI gateway.
+- `bubble-tts.ts`: Pure visible transient-bubble narration candidate, quiet-hours gate, and per-presentation dedupe decisions
+- `default-pet-controller.ts`: Default pet visibility, position persistence, reset-and-show recovery, transient reactions, status badges, logging
 - `agent-pet-controller.ts`: Lease-triggered pet windows, dismissal tracking, transient displays, status badges, logging
-- `pet-motion-engine.ts`: Interpolated movement vector/tick engine for plugin-driven pet motion and target-following behavior
+- `pet-motion-engine.ts`: Shared-ticker interpolation for plugin-driven target moves, physics, and cursor following; accepted targets remain ticker work until completion or supersession
 - `built-in-pet.ts`: Built-in pet constant
 - `reaction-messages.ts`: Message pools for each reaction type
 - `reaction-animation-mapping.ts`: Reaction-to-animation state mapping, user-configurable overrides, sprite state definitions
 - `i18n/`: Host message catalogs and localized reaction pools; see [i18n/codemap.md](i18n/codemap.md)
+
+**Vision**:
+- `vision-settings.ts`: Fresh, default-off atomic consent and 30/60/90-minute pause state; it does not migrate the stale Companion screen placeholder.
+- `vision-store.ts`: Local screenshot/index storage with 24-hour, entry, file, total-byte, text, and index-size bounds plus delete-on-disable.
+- `vision-capture.ts`: Electron `desktopCapturer` adapter that treats successful thumbnail capture as authoritative over stale macOS status and captures the default pet's display within image-size bounds.
+- `vision-service.ts`: Health, scheduling, capture/summarize/store lifecycle, suspend/lock teardown, privacy-safe snapshots/logs, and summary-only Companion/proactive adapters.
+- `vision-menu.ts`: Shared tray and default-pet pause/resume submenu construction.
+
+**Voice + wake**:
+- `voice-platform.ts`: Constructs providers/capture/transcription/Companion/output and a fail-closed production wake runtime; persistent capture dependencies are injected only after the packaged target bundle validates and reports healthy.
+- `voice-capture-core.ts` / `voice-capture.ts` / `voice-capture-worklet.ts`: Single finite-WAV/PCM microphone authority, sandboxed Electron adapter, bounded saved-device-to-System-Default recovery, exact 16 kHz mono framing, sender/session validation, privacy balance, and teardown.
+- `voice-transcription-settings.ts` / `voice-transcription-router.ts` / `voice-local-transcription.ts` / `voice-openai-transcription.ts`: Listening provider state, health routing, explicit checksum-verified local Whisper model install/one-shot helper execution, and optional OpenAI Audio Transcriptions.
+- `voice-conversation-codex.ts`: Isolated JSON `codex exec`/resume conversation and Vision subprocesses with immediate stdin EOF, bounded output, cancellation, and private temporary workspace ownership.
+- `voice-wake-helper-protocol.ts` / `voice-wake-helper-wire.ts`: Versioned bounded commands/events and explicit little-endian float32 PCM over NDJSON.
+- `voice-wake-sherpa-manifest.ts`: Manifest v2 provenance/build-input digest, current-platform helper/runtime-library, explicit KWS/VAD asset, legal-file, path, symlink, size, checksum, and executable validation.
+- `voice-wake-smoke-attestation.ts`: Pure target/hash validation for native smoke evidence consumed by package staging.
+- `voice-wake-sherpa-runtime.ts`: One-session helper spawn/ready/event/backpressure/abort/stop/crash lifecycle; production derives availability by validating `resources/voice-wake/sherpa-onnx`.
+- `voice-wake-runtime.ts` / `voice-wake-word-service.ts` / `voice-wake-activation.ts`: Injectable runtime/capture interfaces and host-owned wake coordinator with visible acknowledgement, separate-command gating, a start-only no-command guard plus bounded long utterances, completed-response follow-up presentation, default-on five-second follow-up turns, fast cancellation, and timeout cleanup.
+- `voice-conversation-shortcut-core.ts` / `voice-conversation-shortcut.ts`: Testable Control+backtick accelerator contract plus Electron global registration for cancelling false wakes, provider work, and speech without consuming Escape.
 
 **IPC**:
 - `local-ipc.ts`: net.Server implementation, request routing, discovery file management, network security (loopback/private address filtering), logging
@@ -208,7 +262,7 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 - `zip-safety.ts`: ZIP entry path validation (traversal prevention, case collision detection)
 
 **Plugins**:
-- `plugin-manifest.ts`: Manifest V1/V2/V3 schema/types and validation for declarative and JavaScript runtimes, permissions (`timer`/`schedule`, `pet:*`, `pets:*`, `audio`, `events`, `ui:*`, `notify`, `bus`, `ai`, `secrets`, `voice:*`, `auth`, `files`, `system:*`, `clipboard`, `network:*`), config schema, timer triggers, assets, panels, entry files, and pet actions.
+- `plugin-manifest.ts`: Manifest V1/V2/V3 schema/types and validation for declarative and JavaScript runtimes, permissions (`timer`/`schedule`, `pet:*`, `pets:*`, `audio`, `events`, `ui:*`, `notify`, `bus`, `ai`, `companion:context`, `secrets`, `voice:*`, `auth`, `files`, `system:*`, `clipboard`, `network:*`), config schema, timer triggers, assets, panels, entry files, and pet actions.
 - `plugin-manifest-reader.ts`: Safe manifest reader with realpath/allowed-root checks, root filename enforcement, size limit, and expected id/version matching.
 - `plugin-config.ts`: Config defaulting, replacement validation, and runtime resolution for string/number config references.
 - `plugin-state.ts`: Persistent plugin state store (`openpets-plugin-state.json`) with atomic temp+rename writes, normalized records, approved permissions, config, source, and broken reason.
@@ -236,6 +290,8 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 - `plugin-diagnostics.ts`: Per-plugin error/quota/settings-block collector surfaced to inspector and plugin health views.
 - `plugin-events-source.ts`: Host event source adapter for pet/window/system events consumed by `plugin-sdk-events.ts`.
 - `plugin-host-capabilities.ts`: Main-process capability bundle injected into the bridge for Electron side effects.
+- `companion-contributions.ts`: Process-local, quota-bound plugin fact/opportunity store that rechecks plugin enablement and normal/sensitive Companion consent on read.
+- `host-ai-settings.ts` / `host-ai-gateway.ts`: Host-owned Anthropic/OpenAI/OpenRouter/Ollama/custom profiles, shared-slot credential migration, health evidence, completion/streaming, and transcription used by Companion and approved plugin AI calls.
 - `plugin-i18n.ts`: Plugin locale catalog loader and `$t:`/`ctx.t()` resolver with English fallback.
 - `plugin-oauth.ts`: Host-mediated OAuth/PKCE flow and token session lifecycle for plugins.
 - `plugin-panels.ts`: Sandboxed plugin panel BrowserWindow coordinator and message bridge.
@@ -247,7 +303,8 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 - `plugin-voice.ts`: Voice/TTS and one-shot listen facade gated by settings and permissions.
 
 **Agent Integration**:
-- `agent-setup.ts`: Claude/OpenCode/Cursor detection, MCP configuration, hooks management, action journaling
+- `agent-setup.ts`: Claude/OpenCode/Cursor/Codex detection, MCP configuration, hooks management, guided Codex review launch, action journaling
+- `codex-hook-review.ts`: Pure validated macOS/Windows/Linux terminal launch planning for user-owned Codex hook review
 - `claude-memory.ts`: Claude instructions file management (`~/.claude/openpets.md`)
 - `update-checker.ts`: GitHub release polling, update status
 - `update-version.ts`: Version parsing and comparison
@@ -269,6 +326,7 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 | `windows.ts` | Renderer | State snapshots via IPC invoke |
 | `agent-setup.ts` | Claude/OpenCode/Cursor CLI | MCP add/remove, config writes |
 | All modules | `logger.ts` | Structured logs to `userData/logs/openpets.log` |
+| `VoiceCaptureService` | `voice-wake-sherpa-runtime.ts` | Ephemeral bounded 16 kHz mono PCM over NDJSON only after the current-target packaged bundle validates and Listen is explicitly enabled |
 | Plugin catalog | `plugin-catalog.ts`/`plugin-service.ts` | Discoverable plugin metadata filtered by app version and install state |
 | Plugin ZIP/local folder | `plugin-package.ts`/`plugin-local-loader.ts` | Validated manifest snapshot installed under `userData/plugins*` |
 | `plugin-state.ts` | `userData/openpets-plugin-state.json` | Installed plugins, enabled flag, approved permissions, config, broken status |

@@ -105,10 +105,24 @@
   .settings-section-title { @apply m-0 font-monoDisplay text-2xl font-black text-navy; }
 
   .settings-group { @apply flex flex-col overflow-hidden rounded-[24px] border border-blue-100/70 bg-white/55 shadow-sm; }
+  .ai-provider-card { @apply mb-5 transition-all; }
+  .ai-provider-card-active { @apply border-blue-400 bg-white shadow-md ring-2 ring-blue-200/70; }
+  .ai-provider-card-header { @apply bg-white/70; }
+  .ai-brain-selector-card { @apply mb-7 border-blue-300 bg-blue-50/70 shadow-md; }
   .settings-row { @apply flex items-center justify-between gap-4 p-5 transition-colors hover:bg-white/80 border-b border-blue-50 last:border-b-0; }
   .settings-row-info { @apply flex-1 min-w-0; }
   .settings-row-info strong { @apply block text-sm font-bold text-navy; }
   .settings-row-info small { @apply mt-0.5 block text-xs leading-relaxed text-slatecopy; }
+  .settings-select-row .settings-row-info { @apply basis-[44%]; }
+  .settings-select-row > .settings-select { flex: 0 1 520px; width: min(48%, 520px); max-width: 100%; }
+  .settings-row-controls { @apply flex min-w-0 flex-[0_1_560px] items-center justify-end gap-3; }
+  .settings-row-controls .settings-select { @apply min-w-0 flex-1; max-width: 480px; }
+  @media (max-width: 900px) {
+    .settings-select-row { @apply flex-col items-stretch; }
+    .settings-select-row .settings-row-info { @apply basis-auto; }
+    .settings-select-row > .settings-select { width: 100%; flex-basis: auto; }
+    .settings-row-controls { @apply w-full flex-none justify-between; }
+  }
 
   .settings-toggle { @apply h-6 w-11 shrink-0 cursor-pointer accent-brand disabled:cursor-not-allowed; }
   .settings-select { @apply min-h-10 min-w-[140px] rounded-xl border border-blue-200/80 bg-white/80 px-3 py-2 text-sm font-semibold text-navy outline-none focus:border-brand focus:ring-4 focus:ring-brand/15 disabled:cursor-not-allowed disabled:opacity-60; }
@@ -192,6 +206,77 @@
   .pet-preview-grid { @apply grid gap-3; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .pet-preview-item { @apply flex flex-col items-center justify-center gap-2 rounded-2xl border border-blue-100 bg-white/60 p-2.5 shadow-sm; }
   .pet-detail-actions .grid { @apply grid-cols-1 sm:grid-cols-2; }
+  .companion-panel { @apply mt-2 flex flex-col gap-4 rounded-[24px] border border-blue-200/70 bg-blue-50/45 p-5; box-shadow: inset 0 1px 0 rgba(255,255,255,.9); }
+  .companion-panel-head { @apply flex items-start justify-between gap-4; }
+  .companion-panel-head h3 { @apply m-0 font-monoDisplay text-xl font-black text-navy; }
+  .companion-panel-head p:not(.eyebrow) { @apply mb-0 mt-1 max-w-2xl text-sm leading-relaxed text-slatecopy; }
+  .companion-panel-body { @apply flex flex-col gap-4; }
+  .companion-panel-message { @apply mb-0; }
+  .companion-success { @apply rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700; }
+  .companion-disclosure { @apply flex flex-col items-start gap-3 rounded-2xl border border-blue-100 bg-white/75 p-4 text-sm text-slatecopy; }
+  .companion-disclosure strong { @apply text-navy; }
+  .companion-disclosure p { @apply m-0 leading-relaxed; }
+  .wake-calibration-card { @apply flex flex-wrap items-center justify-between gap-4 border-b border-blue-100/70 px-4 py-4; }
+  .wake-calibration-card .settings-row-info { @apply min-w-[260px] flex-1; }
+  .wake-calibration-actions { @apply flex flex-wrap items-center justify-end gap-2; }
+  .wake-calibration-prompt { @apply mt-1 rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 font-semibold text-navy; }
+  .wake-calibration-interpretations { @apply mt-2 flex flex-wrap gap-2; }
+  .wake-calibration-interpretation { @apply inline-flex items-center gap-2 rounded-full border border-blue-200 bg-white px-3 py-1 text-xs font-semibold text-navy shadow-sm transition hover:border-red-200 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50; }
+  .wake-input-level { @apply flex min-w-[140px] items-center justify-end gap-3 text-xs font-semibold text-slatecopy; }
+  .wake-input-level-bars { @apply flex h-6 items-end gap-1; }
+  .wake-input-level-bars span { @apply block w-2 rounded-sm bg-blue-100 transition-colors; }
+  .wake-input-level-bars span:nth-child(1) { height: 25%; }
+  .wake-input-level-bars span:nth-child(2) { height: 45%; }
+  .wake-input-level-bars span:nth-child(3) { height: 70%; }
+  .wake-input-level-bars span:nth-child(4) { height: 100%; }
+  .wake-input-level-bars span.is-active { @apply bg-brand; }
+  .companion-field { @apply flex min-w-0 flex-col gap-1.5 text-xs font-bold text-navy; }
+  .companion-field small { @apply text-sm font-normal leading-relaxed text-slatecopy; }
+  .companion-field input, .companion-field textarea, .companion-field select, .companion-composer textarea { @apply w-full rounded-xl border border-blue-200/80 bg-white/90 px-3 py-2 text-sm font-medium text-navy outline-none transition focus:border-brand focus:ring-4 focus:ring-brand/15; }
+  .companion-field textarea, .companion-composer textarea { @apply resize-y leading-relaxed; }
+  .companion-field-actions { @apply flex items-center justify-between gap-3 text-[11px] font-semibold text-slatecopy; }
+  .settings-row-stack { @apply flex-col items-stretch; }
+  .companion-unsaved { @apply w-full rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800; }
+  .character-generator { @apply flex flex-col gap-4 rounded-2xl border border-blue-200 bg-white/75 p-4; }
+  .character-generator-head { @apply flex flex-wrap items-start justify-between gap-4 border-b border-blue-100 pb-4; }
+  .character-generator-head > div:first-child { @apply flex min-w-[240px] flex-1 flex-col; }
+  .character-generator-head small { @apply mt-1 text-sm font-normal leading-relaxed text-slatecopy; }
+  .character-brain-status { @apply flex max-w-sm flex-col items-start gap-1; }
+  .character-brain-status small { @apply m-0 text-xs; }
+  .character-generator-options { @apply grid grid-cols-1 gap-3 lg:grid-cols-2; }
+  .character-generator-option { @apply flex min-h-[148px] flex-col justify-between gap-4 rounded-2xl border border-blue-100 bg-white/80 p-4; }
+  .character-generator-option-featured { @apply border-blue-300 bg-blue-50/70 shadow-sm; }
+  .character-generator-option > div { @apply flex flex-col gap-1; }
+  .character-generator-option > div > strong { @apply text-base text-navy; }
+  .character-generator-option small { @apply text-sm font-normal leading-relaxed text-slatecopy; }
+  .character-generator-help { @apply m-0 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-relaxed text-amber-900; }
+  .character-generation-progress { @apply flex items-center gap-3 rounded-xl border border-blue-300 bg-blue-50 px-4 py-3 text-navy; }
+  .character-generation-progress > div { @apply flex flex-col; }
+  .character-generation-progress small { @apply mt-0.5 text-sm text-slatecopy; }
+  .character-generation-spinner { @apply h-6 w-6 shrink-0 rounded-full border-[3px] border-blue-200 border-t-brand; animation: character-spin 0.8s linear infinite; }
+  .character-save-bar { @apply flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-blue-300 bg-white/95 p-4 shadow-lg backdrop-blur sticky bottom-0 z-10; }
+  .character-save-bar strong { @apply text-sm text-amber-800; }
+  .character-save-bar > div:first-child > span { @apply text-sm text-slatecopy; }
+  .character-save-bar .btn-primary { color: #fff; background: linear-gradient(180deg, #2684ff, #075bd8); border-color: #0752c5; box-shadow: inset 0 1px 0 rgba(255,255,255,0.42), 0 4px 10px rgba(23,109,242,0.25); }
+  .character-save-bar .btn-primary .btn-text { @apply text-white; }
+  @keyframes character-spin { to { transform: rotate(360deg); } }
+  .character-count { @apply self-end text-[10px] font-semibold text-slatecopy; }
+  .plugin-permission-note { @apply m-0 rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-xs leading-relaxed text-slatecopy; }
+  .companion-profile-grid, .companion-options-grid { @apply grid grid-cols-1 gap-3 sm:grid-cols-2; }
+  .companion-toggles { @apply grid grid-cols-1 gap-2 sm:grid-cols-2; }
+  .companion-health-note { @apply -mt-2 mb-0 rounded-xl border border-amber-200/70 bg-amber-50/70 px-3 py-2 text-xs leading-relaxed text-amber-800; }
+  .companion-toggles > label { @apply flex cursor-pointer items-start gap-2 rounded-xl border border-blue-100/70 bg-white/65 p-3; }
+  .companion-toggles input { @apply mt-0.5 h-4 w-4 shrink-0 accent-brand; }
+  .companion-toggles span { @apply flex min-w-0 flex-col; }
+  .companion-toggles strong { @apply text-xs text-navy; }
+  .companion-toggles small { @apply mt-0.5 text-[11px] font-normal leading-relaxed text-slatecopy; }
+  .companion-composer { @apply flex flex-col gap-2 rounded-2xl border border-brand/20 bg-white/80 p-4; }
+  .companion-composer > label { @apply font-monoDisplay text-sm font-black uppercase tracking-wide text-navy; }
+  .companion-composer-actions { @apply flex flex-wrap gap-2; }
+  .companion-last-reply { @apply mt-1 rounded-xl border border-blue-100 bg-blue-50/70 p-3 text-xs text-slatecopy; }
+  .companion-last-reply strong { @apply text-navy; }
+  .companion-last-reply p { @apply mb-0 mt-1 whitespace-pre-wrap leading-relaxed; }
+  .companion-danger-row { @apply flex flex-wrap items-center justify-between gap-2 border-t border-blue-100 pt-4; }
   @keyframes plugin-fade-in { from { opacity: 0; } to { opacity: 1; } }
   @keyframes plugin-pop-in { from { opacity: 0; transform: scale(0.96) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
   .plugin-inspector-head { @apply flex items-center gap-4; }
@@ -243,6 +328,35 @@
   .integration-icon { @apply grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-xl border border-blue-100/70 bg-blue-50/70 text-brand shadow-sm; }
   .integration-logo { @apply h-8 w-8 object-contain; }
   .integration-icon svg { @apply w-6 h-6; }
+  .codex-connection-card { @apply border-brand/25 bg-gradient-to-br from-white via-blue-50/55 to-indigo-50/45; box-shadow: 0 12px 28px rgba(37, 99, 235, 0.08), inset 0 1px 0 rgba(255,255,255,0.9); }
+  .codex-detection-grid { @apply grid grid-cols-2 gap-2; }
+  .codex-detection-grid > div { @apply flex min-w-0 flex-col gap-0.5 rounded-xl border border-blue-100/60 bg-white/65 px-3 py-2.5; }
+  .codex-detection-grid small { @apply font-monoDisplay text-[10px] font-black uppercase tracking-wider text-slatecopy; }
+  .codex-detection-grid strong { @apply text-xs font-black text-navy; }
+  .codex-status-facts { @apply flex flex-col divide-y divide-blue-100/70 rounded-xl border border-blue-100/60 bg-white/65 px-3; }
+  .codex-status-facts > div { @apply flex items-center justify-between gap-3 py-2.5; }
+  .codex-status-facts span { @apply text-xs font-bold text-slatecopy; }
+  .codex-status-facts strong { @apply text-right text-xs text-navy; }
+  .codex-action-bar { @apply grid grid-cols-2 gap-2 border-t border-blue-100/70 pt-3; }
+  .codex-approval-callout { @apply rounded-2xl border border-amber-200/80 bg-amber-50/80 px-4 py-3 text-amber-900; }
+  .codex-approval-callout strong { @apply text-sm font-black; }
+  .codex-approval-callout p { @apply mb-0 mt-1 text-xs leading-relaxed; }
+  .codex-approval-actions { @apply my-3; }
+  .codex-approval-guide { @apply my-3 flex list-none flex-col gap-2 p-0; }
+  .codex-approval-guide li { @apply flex items-start gap-2; }
+  .codex-approval-guide li > span { @apply mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-amber-200/80 text-[10px] font-black; }
+  .codex-approval-guide li p { @apply mt-0; }
+  .codex-review-opened { @apply my-3 flex flex-col gap-2 rounded-xl border border-amber-200 bg-white/70 p-3; }
+  .codex-review-opened p { @apply mt-0; }
+  .codex-approval-poll-error { @apply text-red-700; }
+  .codex-approval-note { @apply border-t border-amber-200/80 pt-2 font-semibold; }
+  .codex-capability-grid { @apply grid grid-cols-2 gap-3; }
+  .codex-capability-card { @apply flex flex-col gap-2 rounded-2xl border border-blue-100/70 bg-white/70 p-4; }
+  .codex-capability-card-wide { @apply col-span-2; }
+  .codex-capability-card > strong { @apply text-sm text-navy; }
+  .codex-capability-card > p { @apply m-0 text-xs leading-relaxed text-slatecopy; }
+  .codex-capability-card > small { @apply rounded-xl bg-blue-50/80 p-2.5 text-xs font-semibold leading-relaxed text-navy; }
+  @media (max-width: 640px) { .codex-detection-grid, .codex-action-bar, .codex-capability-grid { @apply grid-cols-1; } .codex-capability-card-wide { @apply col-span-1; } }
 
   /* Dashboard */
   .dashboard-layout { @apply flex flex-col gap-6 overflow-y-auto pr-2 pb-8 h-full; overscroll-behavior: contain; }

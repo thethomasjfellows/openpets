@@ -11,6 +11,8 @@ artifactName: OpenPets-${version}-${os}-${arch}.${ext}
 files:
   - dist/**
   - control-center-preload.cjs
+  - voice-capture-preload.cjs
+  - voice-capture.html
   - pet-preload.cjs
   - plugin-sdk-preload.cjs
   - plugin-command-form-preload.cjs
@@ -21,6 +23,10 @@ files:
 extraResources:
   - from: ../../plugins/official
     to: plugins/official
+  - from: wake-helper/package-resource
+    to: voice-wake/sherpa-onnx
+  - from: livekit-wake-helper/package-resource
+    to: voice-wake/livekit
 
 asar: true
 asarUnpack:
@@ -34,6 +40,8 @@ toolsets:
 mac:
   icon: assets/app-icon.icns
   category: public.app-category.utilities
+  extendInfo:
+    NSMicrophoneUsageDescription: OpenPets uses the microphone to detect your local wake phrase and transcribe only the short request that follows it.
   target:
     - dmg
     - zip
@@ -41,6 +49,11 @@ mac:
   # Leaving the app bundle fully unsigned can produce Gatekeeper's misleading
   # "damaged and can't be opened" dialog on Apple Silicon releases.
   identity: "-"
+  # Helper/runtime bytes are ad-hoc signed before manifest hashing. Preserve those
+  # exact bytes so the installed manifest remains authoritative.
+  signIgnore:
+    - /Contents/Resources/voice-wake/sherpa-onnx/(?:bin|lib)/
+    - /Contents/Resources/voice-wake/livekit/bin/
   hardenedRuntime: false
   gatekeeperAssess: false
 

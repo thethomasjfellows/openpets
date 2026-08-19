@@ -1,10 +1,10 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-import { handleReact, handleSay, handleStatus, reactSchema, saySchema, type ToolContext } from "./tools.js";
+import { handleReact, handleSay, handleShowMedia, handleStatus, reactSchema, saySchema, showMediaSchema, type ToolContext } from "./tools.js";
 
 export function createOpenPetsMcpServer(context: ToolContext): McpServer {
   const server = new McpServer({ name: "open-pets", version: "0.0.0" }, {
-    instructions: "Interact with the user's OpenPets desktop companion. Use openpets_status first. Use openpets_say only for short status/personality messages, never code, logs, secrets, URLs, or file paths.",
+    instructions: "Interact with the user's OpenPets desktop companion. Use openpets_status first. Use openpets_say only for short status/personality messages, never code, logs, secrets, URLs, or file paths. Use openpets_show_media only for an intentional local image the user should see.",
   });
 
   server.registerTool("openpets_status", {
@@ -27,6 +27,13 @@ export function createOpenPetsMcpServer(context: ToolContext): McpServer {
     inputSchema: saySchema,
     annotations: { readOnlyHint: false, idempotentHint: false },
   }, async (input) => handleSay(input, context));
+
+  server.registerTool("openpets_show_media", {
+    title: "OpenPets Show Media",
+    description: "Show an intentional local PNG, JPG, WEBP, or GIF in the OpenPets pet bubble.",
+    inputSchema: showMediaSchema,
+    annotations: { readOnlyHint: false, idempotentHint: false },
+  }, async (input) => handleShowMedia(input, context));
 
   return server;
 }

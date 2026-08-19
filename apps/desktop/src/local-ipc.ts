@@ -5,14 +5,15 @@ import { Notification, shell, systemPreferences } from "electron";
 
 import { applyAgentPetReaction, applyAgentPetSay, applyAgentPetShowMedia, clearAgentPetLeaseState, repositionConfinedPet, showAgentPet } from "./agent-pet-controller.js";
 import { classifyAnalyticsError, trackDesktopEvent, trackDesktopIntegrationActivity } from "./analytics.js";
-import { getAppStateSnapshot, recordOpenPetsActivity } from "./app-state.js";
+import { getAppStateSnapshot, recordCodexIntegrationEvent, recordOpenPetsActivity } from "./app-state.js";
+import { isCodexLifecycleReactionEnabled } from "./codex-reaction-preferences.js";
 import { builtInPet } from "./built-in-pet.js";
 import { applyExternalPetReaction, applyExternalPetSay, applyExternalPetShowMedia, getDefaultPetPaused, isDefaultPetVisible } from "./default-pet-controller.js";
 import { createStaleLeaseStatus, LeaseManager } from "./lease-manager.js";
 import { debug, error as logError, info } from "./logger.js";
 import { cleanupUnixSocket, getDiscoveryFilePath, getIpcEndpointConfig, parseIpcEndpoint, protectUnixSocket, removeDiscoveryFile, writeDiscoveryFile, type IpcEndpoint, type IpcEndpointConfig, type OpenPetsDiscoveryFile } from "./local-ipc-paths.js";
 import { stat } from "node:fs/promises";
-import { errorResponse, IpcProtocolError, isRecord, maxIpcMessageBytes, maxMediaFileBytes, okResponse, parseIpcRequest, validateInstallLocalKind, validateInstallLocalPath, validateInstallPetId, validateMediaClickUrl, validateMediaDurationMs, validateMediaPath, validateOptionalLeaseId, validateReaction, validateRequestedPetId, validateSayMessage, validateSessionNonce, type OpenPetsIpcRequest } from "./local-ipc-protocol.js";
+import { errorResponse, IpcProtocolError, isRecord, maxIpcMessageBytes, maxMediaFileBytes, okResponse, parseIpcRequest, validateInstallLocalKind, validateInstallLocalPath, validateInstallPetId, validateIntegrationEvent, validateMediaClickUrl, validateMediaDurationMs, validateMediaPath, validateOptionalLeaseId, validateReaction, validateRequestedPetId, validateSayMessage, validateSessionNonce, type OpenPetsIpcRequest } from "./local-ipc-protocol.js";
 import { installPet, installPetFromFolderWithResult, installPetFromZipFileWithResult } from "./pet-installation.js";
 import { clearConfinementState, setConfinementState } from "./confinement-manager.js";
 import { isConfinementSupported } from "./capabilities.js";
@@ -334,6 +335,14 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
       })),
       defaultPetId: state.preferences.defaultPetId,
     };
+  }
+
+  if (request.method === "integration.event") {
+    const event = validateIntegrationEvent(request.params);
+    const state = recordCodexIntegrationEvent(event);
+    const reactionEnabled = isCodexLifecycleReactionEnabled(state.integrations.codex.reactionPreferences, event.lifecycle);
+    debug("ipc", "integration event received", { integrationId: event.integrationId, lifecycle: event.lifecycle, reactionEnabled });
+    return { ok: true, integrationId: event.integrationId, lifecycle: event.lifecycle, reactionEnabled };
   }
 
   if (request.method === "pets.install") {
